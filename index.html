@@ -1625,7 +1625,7 @@ function mqttRoom(code){return new Promise(async res=>{
   const me=Math.random().toString(36).slice(2,12),base='chickwings/v1/'+code+'/p/',map=new Map(),hs=[],cs=[];let pres={},snap=[],con=false,done=false,sweep=0;
   const rebuild=()=>{snap=Object.freeze([Object.freeze({peer:me,by:null,isMe:true,sameTab:true,kind:'viewer',guest:false,presence:Object.freeze({...pres}),updatedAt:Date.now()}),...map.values()]);};
   const fire=(j,l,u)=>{rebuild();const ch={peers:snap,joined:j,left:l,updated:u};hs.forEach(h=>{try{h(ch);}catch(e){}});};
-  let cl;try{cl=mqtt.connect(MQTT_URL,{clientId:'cw_'+me,clean:true,keepalive:20,reconnectPeriod:2500,connectTimeout:7000,
+  let cl;try{cl=mqtt.connect(MQTT_URL,{clientId:'cw_'+me,clean:true,keepalive:20,reconnectPeriod:2500,connectTimeout:15000,
     will:{topic:base+me,payload:'',qos:0,retain:false}});}catch(e){return res(null);}
   const setCon=c=>{if(c===con)return;con=c;cs.forEach(h=>{try{h(c);}catch(e){}});};
   const api={kind:'net',code,
@@ -1636,7 +1636,7 @@ function mqttRoom(code){return new Promise(async res=>{
   cl.on('connect',()=>{setCon(true);cl.subscribe(base+'+',{qos:0});if(!done){done=true;res(api);}});
   cl.on('close',()=>setCon(false));cl.on('offline',()=>setCon(false));
   cl.on('error',()=>{if(!done){done=true;try{cl.end(true);}catch(e){}res(null);}});
-  setTimeout(()=>{if(!done){done=true;try{cl.end(true);}catch(e){}res(null);}},8000);
+  setTimeout(()=>{if(!done){done=true;try{cl.end(true);}catch(e){}res(null);}},20000);
   cl.on('message',(topic,buf)=>{const peer=topic.slice(base.length).replace(/[^a-z0-9]/g,'').slice(0,16);if(!peer||peer===me)return;
     if(!buf||!buf.length||buf.length>4096){const p=map.get(peer);if(p){map.delete(peer);fire([],[p],[]);}return;}
     let pr;try{pr=JSON.parse(new TextDecoder().decode(buf));}catch(e){return;}if(!pr||typeof pr!=='object'||Array.isArray(pr))return;
@@ -1657,12 +1657,12 @@ async function mpInit(code){
   let room=null;
   if(/[?&]mockroom=1/.test(location.search)){room=mockRoom();MP.via='test';}
   else{
-    if(mpUiReady){$('mpLobby').classList.remove('hidden');$('mpStat').textContent='… connexion au salon en cours';}
+    mpUi();$('mpStat').textContent='… connexion au salon Internet en cours';
     room=await mqttRoom(code);if(room)MP.via='net';
     if(!room){try{if(window.claude&&window.claude.use)room=await window.claude.use('room');}catch(e){room=null;}if(room)MP.via='claude';}
   }
   if(MP.code!==code){if(room&&room.close)room.close();return;}
-  if(!room){mpLobby();return;}
+  if(!room){$('mpStat').textContent='⚠ Salon Internet injoignable, nouvel essai…';setTimeout(()=>{if(!MP.room&&MP.code===code)mpInit(code);},5000);return;}
   MP.room=room;
   // les départs déjà présents à l’arrivée sont ignorés ; un nouveau départ vu en mise à jour lance la course (aucune horloge partagée)
   room.onPeers(ch=>{if(MP.room!==room)return;MP.peers=ch.peers;for(const p of ch.left)mpDropGhost(p.peer);
