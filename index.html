@@ -149,6 +149,18 @@ body.touch #mpRaceBtn{bottom:96px;font-size:13px;padding:9px 14px}
 #endBtns{display:flex;gap:8px;flex-wrap:wrap}
 body.touch #mpBoard{left:8px;top:172px;font-size:10.5px;min-width:0;padding:5px 8px}
 body.touch #mpBoard .r b{max-width:80px}
+/* ===== spectateur ===== */
+#specBar{position:fixed;left:0;right:0;top:0;padding:12px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:linear-gradient(rgba(0,0,0,.7),transparent);z-index:9;pointer-events:none}
+#specBar .t{font-weight:900;letter-spacing:.12em;color:#8fd0ff;font-size:13px}
+#specName{font-weight:800;font-size:18px;margin-left:8px}
+#specInfo{font-size:13px;opacity:.9;font-variant-numeric:tabular-nums;margin-top:2px}
+#specBtns{display:flex;gap:6px;align-items:center;pointer-events:auto}
+#specBtns button{font-size:13px;padding:8px 12px;background:rgba(8,14,22,.7);color:#fff;border:1px solid rgba(255,255,255,.25)}
+#specBtns button kbd{background:rgba(255,255,255,.18);border-radius:4px;padding:0 5px;font-family:inherit;margin-left:4px;font-size:11px}
+body.touch #specBtns button kbd{display:none}
+body.spec #instru,body.spec #objective,body.spec #arrowWrap,body.spec #help,body.spec #scoreBox,body.spec #touchUI,body.spec #toasts{display:none!important}
+body.spec #mpBoard{top:96px}
+#specBtn{background:#8fd0ff;color:#06121f}
 </style>
 </head>
 <body>
@@ -228,12 +240,14 @@ body.touch #mpBoard .r b{max-width:80px}
     <div id="endStats"></div>
     <div id="mpEnd" class="hidden"></div>
     <div id="replays"></div>
-    <div id="endBtns"><button id="mpAgain" class="mpBtn hidden">🏁 Nouvelle course pour tous</button><button id="retryBtn">Recommencer<span class="deskOnly" style="display:inline"> (R)</span></button></div>
+    <div id="endBtns"><button id="specBtn" class="hidden">👁 Regarder les autres<span class="deskOnly" style="display:inline"> (V)</span></button><button id="mpAgain" class="mpBtn hidden">🏁 Nouvelle course pour tous</button><button id="retryBtn">Recommencer<span class="deskOnly" style="display:inline"> (R)</span></button></div>
   </div>
 </div>
 
 <div id="replayBar" class="hidden"><div><span class="rec">● REPLAY</span> &nbsp; <span id="replayLabel"></span></div><div style="display:flex;align-items:center"><div id="replayHint">Échap : retour · R : recommencer</div><button id="replayBack">✕ Retour</button></div></div>
 <div id="mpCD"></div>
+<div id="specBar" class="hidden"><div><span class="t">👁 SPECTATEUR</span><span id="specName"></span><div id="specInfo"></div></div>
+  <div id="specBtns"><button id="specNextB">👤 Pilote suivant<kbd>N</kbd></button><button id="specViewB">🎥 <span id="specViewN">Poursuite</span><kbd>V</kbd></button><button id="specExitB">✕ Retour<kbd>Échap</kbd></button></div></div>
 <div id="cineTop" class="cine hidden" style="top:0"></div><div id="cineBot" class="cine hidden" style="bottom:0"></div>
 <div id="pauseScreen" class="screen hidden"><div class="card"><div id="endTitle" style="font-size:34px;font-weight:900">PAUSE</div><p class="small" style="opacity:.85">Le vent attend. La montagne aussi.<span class="deskOnly"><br><kbd>P</kbd> pour reprendre</span></p><button id="pauseResume">Reprendre</button></div></div>
 <div id="rotateHint"><div class="ph">📱</div><div>Tournez votre téléphone en paysage</div><button id="rotateSkip" style="font-size:13px;padding:8px 14px;background:rgba(255,255,255,.12);color:#fff">Continuer en portrait</button></div>
@@ -902,10 +916,13 @@ const FUN=[()=>`Facture de l'hélico de secours : ${Math.round(3000+Math.random(
 
 /* ================= CONTROLS ================= */
 addEventListener('keydown',e=>{
-  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)||(e.code==='Tab'&&(SPEC.on||endShown)))e.preventDefault();
   if(e.repeat)return;keys[e.code]=true;onKey(e.code);
 });
 function onKey(code){const e={code};
+  if(SPEC.on){if(code==='KeyN'||code==='Tab'||code==='ArrowRight')specNext(1);else if(code==='ArrowLeft')specNext(-1);else if(code==='KeyV'||code==='KeyC')specView();
+    else if(code==='Escape'||code==='Enter')specExit(true);else if(code==='KeyR')resetRun();return;}
+  if(endShown&&!RP&&(code==='KeyV'||code==='KeyN'||code==='Tab')&&specAvail().length){specEnter();return;}
   if(e.code==='Space'){if(state==='title')startGame();else if(state==='ready')doJump();else if(state==='flying')deploy();}
   if(RP&&(e.code==='Escape'||e.code==='Enter')){stopReplay(true);return;}
   if(endShown&&!RP&&/^(Digit|Numpad)\d$/.test(e.code)){const n=+e.code.slice(-1);if(n===0)startReplay(null);else if(RPLIST[n-1])startReplay(RPLIST[n-1]);return;}
@@ -1004,6 +1021,7 @@ $('retryBtn').onclick=()=>resetRun();
 /* ================= FLOW ================= */
 function startGame(){if(state!=='title')return;document.body.classList.add('playing');setTimeout(padHome,0);AU.init();if(AU.ctx&&AU.ctx.state==='suspended')AU.ctx.resume();$('titleScreen').classList.add('hidden');$('hud').classList.remove('hidden');resetRun();}
 function resetRun(){
+  if(SPEC.on)specExit(false);
   state='ready';paused=false;endShown=false;practice=false;$('pauseScreen').classList.add('hidden');$('endScreen').classList.add('hidden');
   P.heading=0;P.pos.set(EXIT.x,groundH(EXIT.x,EXIT.z)+1.15,EXIT.z);P.vel.set(0,0,0);P.alpha=11;P.trim=11;P.bank=0;P.rightH.set(1,0,0);P.idle=0;P.blend=0;P.rag=null;P.crashCause=null;P.flare=0;P.flareHold=0;P.turn=0;P.landKind=null;
   hangQuat(0,P.quat);canopyG.visible=false;canopyG.scale.set(1,1,1);canopyG.rotation.set(0,0,0);
@@ -1365,6 +1383,7 @@ function drawMinimap(){const cv=$('minimap'),g=cv.getContext('2d');if(!mmBase)re
 const camPos=new V3(),camOff=new V3(0,3,12),camLook=new V3();let orbitA=0,shake=0;
 const DBG={cam:null};
 function updateCamera(dt){
+  if(SPEC.on&&specCamera(dt))return;
   if(DBG.cam){camera.position.set(...DBG.cam.p);camera.up.set(0,1,0);camera.lookAt(...DBG.cam.l);camera.fov=DBG.cam.fov||60;camera.updateProjectionMatrix();return;}
   const sp=P.vel.length();let fov=68;
   if(state==='title'){orbitA+=dt*.05;const c=new V3(EXIT.x,EXIT.h,EXIT.z);camera.position.set(c.x+Math.sin(orbitA)*70,c.y+28,c.z+Math.cos(orbitA)*70);camera.up.set(0,1,0);camera.lookAt(c.x,c.y-200,c.z-900);}
@@ -1756,7 +1775,9 @@ function mpGhosts(){
     GK.forEach((n,i)=>_gB[n]=lerp(a.bp[i],b.bp[i],kq));poseBody(_gB,G.J);
     if(G.C.visible){const ca=a.cp||b.cp,qa=a.cq||b.cq;G.C.position.set(lerp(ca[0],b.cp[0],k),lerp(ca[1],b.cp[1],k),lerp(ca[2],b.cp[2],k));
       _gq.fromArray(qa);_gq2.fromArray(b.cq);G.C.quaternion.copy(_gq).slerp(_gq2,kq);}
-    G.sp.position.copy(G.J.position);G.sp.position.y+=2.2;
+    G.sp.position.copy(G.J.position);G.sp.position.y+=2.2;G.st=b.st;
+    if(!G.vel){G.vel=new V3();G.lp=G.J.position.clone();G.lt=pnow;}
+    {const d=(pnow-G.lt)/1000;if(d>.005){_gv.copy(G.J.position).sub(G.lp).divideScalar(d);if(_gv.length()<150)G.vel.lerp(_gv,Math.min(1,d*6));G.lp.copy(G.J.position);G.lt=pnow;}}
   }
 }
 function mpResult(tot){if(!MP.race||practice)return;MP.res={id:MP.race.id,sc:tot==null?null:tot,k:state==='crashed'?'crash':'land',t:r2(S.t)};mpEndBoard();}
@@ -1779,6 +1800,7 @@ function mpBoard(){
   B.innerHTML='<div class="h">'+(MP.race?'COURSE EN COURS':'PILOTES CONNECTÉS')+'</div>'+rows.map((r,i)=>'<div class="r'+(r.me?' me':'')+'">'+(MP.race?'<span>'+(i+1)+'.</span>':'')+'<i class="mpDot" style="background:'+hexCss(MP_COLS[r.c])+'"></i><b>'+esc(r.n)+'</b><span>'+esc(stIcon(r))+'</span></div>').join('');
 }
 function mpEndBoard(){
+  $('specBtn').classList.toggle('hidden',!(endShown&&!RP&&specAvail().length));
   const E=$('mpEnd');const show=!!MP.room&&!!MP.race&&mpRows().length>1;E.classList.toggle('hidden',!show);if(!show)return;
   const rows=mpRows();const medal=['🥇','🥈','🥉'];
   E.innerHTML='<div class="rt">🏁 CLASSEMENT DE LA COURSE</div>'+rows.map((r,i)=>'<div class="r'+(r.me?' me':'')+'"><span>'+(r.res&&r.res.sc!=null&&medal[i]?medal[i]:(i+1)+'.')+'</span><span><i class="mpDot" style="background:'+hexCss(MP_COLS[r.c])+'"></i> '+esc(r.n)+(r.me?' (vous)':'')+'</span><span>'+esc(r.res?(r.res.sc==null?'💥 crash':r.res.sc+' pts'):stIcon(r))+'</span></div>').join('');
@@ -1810,6 +1832,50 @@ function mpSend(){
     MP.room.presence(pr).catch(e=>{MP.err='pres:'+(e&&e.code);});}
 }
 setTimeout(mpInit,0);
+
+/* ================= SPECTATEUR ================= */
+const SPEC={on:false,peer:null,view:0,pos:new V3(),fix:null,look:new V3(),f:new V3(0,0,-1)};
+const SPEC_VIEWS=['Poursuite','Travelling','Face','Fixe','Casque','Drone'];
+function specAvail(){return [...MP.ghosts.entries()].filter(([k,G])=>G.J.visible&&G.st!=='ready').map(([k])=>k);}
+function specEnter(){const L=specAvail();if(!L.length){toast('Personne d’autre en vol pour l’instant','warn',1800);return;}
+  // on commence par un pilote encore en vol s’il y en a un
+  SPEC.peer=L.find(k=>['flying','deploying','canopy'].includes(MP.ghosts.get(k).st))||L[0];
+  SPEC.on=true;SPEC.fix=null;SPEC.snap=true;document.body.classList.add('spec');$('endScreen').classList.add('hidden');$('specBar').classList.remove('hidden');specLabel();}
+function specExit(show){SPEC.on=false;document.body.classList.remove('spec');$('specBar').classList.add('hidden');if(show&&endShown)$('endScreen').classList.remove('hidden');}
+function specNext(dir){const L=specAvail();if(!L.length)return;const i=L.indexOf(SPEC.peer);SPEC.peer=L[((i<0?0:i+dir)%L.length+L.length)%L.length];SPEC.fix=null;SPEC.snap=true;specLabel();}
+function specView(){SPEC.view=(SPEC.view+1)%SPEC_VIEWS.length;SPEC.fix=null;SPEC.snap=true;specLabel();}
+function specLabel(){const G=MP.ghosts.get(SPEC.peer);$('specName').textContent=G?G.name:'';$('specName').style.color=G?hexCss(G.col):'';$('specViewN').textContent=SPEC_VIEWS[SPEC.view];}
+const _sc=new V3(),_su=new V3(0,1,0),_ss=new V3(),_st=new V3();
+function specCamera(dt){
+  let G=MP.ghosts.get(SPEC.peer);
+  if(!G||!G.J.visible){const L=specAvail();if(!L.length){specExit(true);return false;}SPEC.peer=L[0];SPEC.fix=null;SPEC.snap=true;specLabel();G=MP.ghosts.get(SPEC.peer);}
+  const T=G.J.position,V=G.vel||_st.set(0,0,0),sp=V.length();
+  if(sp>2)SPEC.f.lerp(_st.copy(V).normalize(),1-Math.exp(-dt*3)).normalize();
+  const f=SPEC.f,side=_ss.copy(f).cross(_su).normalize(),k=SPEC.snap?1:1-Math.exp(-dt*5);let fov=62;
+  const v=SPEC_VIEWS[SPEC.view];
+  if(v==='Poursuite'){_sc.copy(T).addScaledVector(f,-11).addScaledVector(_su,3.2);SPEC.look.copy(T).addScaledVector(f,10);}
+  else if(v==='Travelling'){_sc.copy(T).addScaledVector(side,20).addScaledVector(_su,2).addScaledVector(f,-3);SPEC.look.copy(T);fov=45;}
+  else if(v==='Face'){_sc.copy(T).addScaledVector(f,8.5).addScaledVector(_su,1.6);SPEC.look.copy(T);fov=58;}
+  else if(v==='Casque'){_sc.copy(T).addScaledVector(f,.35).addScaledVector(_su,.55);SPEC.look.copy(T).addScaledVector(f,30);fov=78;}
+  else if(v==='Drone'){_sc.copy(T).addScaledVector(_su,55).addScaledVector(f,-18);SPEC.look.copy(T).addScaledVector(f,25);fov=55;}
+  else{ // Fixe : caméra posée devant la trajectoire, replacée quand le pilote s’éloigne
+    const rel=SPEC.fix?_st.copy(T).sub(SPEC.fix):null;
+    if(!SPEC.fix||rel.length()>230||rel.dot(f)>70){const sgn=Math.random()<.5?-1:1;
+      SPEC.fix=new V3().copy(T).addScaledVector(f,Math.max(90,sp*3.2)).addScaledVector(side,sgn*35);
+      SPEC.fix.y=Math.max(groundH(SPEC.fix.x,SPEC.fix.z)+2.5,T.y-20);SPEC.snap=true;}
+    _sc.copy(SPEC.fix);SPEC.look.copy(T);const d=_sc.distanceTo(T);fov=clamp(2*Math.atan(14/Math.max(1,d))*180/Math.PI,8,60);}
+  // jamais sous le terrain
+  const g=groundH(_sc.x,_sc.z)+1.5;if(_sc.y<g)_sc.y=g;
+  if(v==='Fixe'||v==='Casque'||SPEC.snap)SPEC.pos.copy(_sc);else SPEC.pos.lerp(_sc,k);
+  SPEC.snap=false;G.sp.visible=v!=='Casque';
+  camera.position.copy(SPEC.pos);camera.up.set(0,1,0);camera.lookAt(SPEC.look);
+  camera.fov=lerp(camera.fov,fov,v==='Fixe'?.25:1-Math.exp(-dt*4));camera.updateProjectionMatrix();
+  const agl=Math.max(0,T.y-groundH(T.x,T.z));
+  $('specInfo').textContent=({flying:'✈ en vol',deploying:'🪂 ouverture',canopy:'🪂 sous voile',landed:'✔ posé',crashed:'💥 au tapis'}[G.st]||'')+
+    ' · '+Math.round(sp*3.6)+' km/h · '+Math.round(agl)+' m/sol · '+(Math.max(0,-T.z)/1000).toFixed(2).replace('.',',')+' km';
+  return true;
+}
+$('specBtn').onclick=()=>specEnter();$('specNextB').onclick=()=>specNext(1);$('specViewB').onclick=()=>specView();$('specExitB').onclick=()=>specExit(true);
 
 /* ================= INIT ================= */
 function init(){
