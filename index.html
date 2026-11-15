@@ -1118,7 +1118,7 @@ function physicsStep(h){
     if(tr){crash(state==='deploying'?'lowchute':(tr.rock||tr.needle)?'rock':'tree');return;}
     const ah=archHit(p);if(ah){crash(state==='deploying'?'lowchute':'arch');return;}
     if(inChalet(p)){crash(state==='deploying'?'lowchute':'terrain');return;}
-    WALLS.forEach((W,i)=>{if(!S.holes[i]&&P.prevZ>W.zc&&p.z<=W.zc&&holeQ(W,p.x,p.y)<1){S.holes[i]=true;S.score+=500;timeScale=.35;flash(.35,'#ffb066');toast(W.short+' FRANCHI !  +500','good big',3000);AU.whoosh();
+    WALLS.forEach((W,i)=>{if(!S.holes[i]&&P.prevZ>W.zc&&p.z<=W.zc&&holeQ(W,p.x,p.y)<1){S.holes[i]=true;S.score+=500;if(!MP.race)timeScale=.35;flash(.35,'#ffb066');toast(W.short+' FRANCHI !  +500','good big',3000);AU.whoosh();
       const c=slotClear(W,p.x,p.y);
       recEvent('hole',W.name+' — à '+fmt1(c)+' m de la roche',c,true);}});
     ARCHES.forEach(A=>{if(A.passed)return;archLocal(A,p.x,p.y,p.z,_al);const zn=_al.z,yl=_al.y,xl=_al.x,zp=archLocal(A,P.prevX,P.prevY,P.prevZ,{x:0,y:0,z:0}).z;
@@ -1563,9 +1563,21 @@ function fxUpdate(dt){
 
 /* ================= MAIN LOOP ================= */
 let acc=0,last=performance.now();const H=1/120;
+const QL={ema:1/60,t:0,lvl:0,pr0:renderer.getPixelRatio()};
+function adaptQuality(raw){
+  if(state==='loading'||document.hidden||raw>.5||raw<=0)return;
+  QL.ema+=(raw-QL.ema)*.05;QL.t+=raw;if(QL.t<2.5)return;QL.t=0;
+  if(QL.ema>1/38&&QL.lvl<4){QL.lvl++;
+    if(QL.lvl===1)renderer.setPixelRatio(Math.min(QL.pr0,1));
+    else if(QL.lvl===2)renderer.setPixelRatio(.8);
+    else if(QL.lvl===3)sun.castShadow=false;
+    else renderer.setPixelRatio(.62);
+    renderer.setSize(innerWidth,innerHeight);
+    if(QL.lvl===1)toast('Graphismes allégés pour plus de fluidité','fun',2200);}
+}
 function frame(now){
   requestAnimationFrame(frame);
-  let dtR=Math.min(.05,(now-last)/1000);last=now;
+  const rawDt=(now-last)/1000;let dtR=Math.min(.1,rawDt);last=now;adaptQuality(rawDt);
   if(state==='loading'){renderer.render(scene,camera);return;}
   mpTick(dtR);
   if(paused){renderer.render(scene,camera);return;}
@@ -1576,7 +1588,7 @@ function frame(now){
     if(P.idle>11)once('g1',()=>toast('Le guide : « Bon, on y va ou on attend la neige ? »','fun',3200));
     if(P.idle>20)once('g2',()=>toast('Le guide : « Je compte jusqu\'à trois… »','warn',2500));
     if(P.idle>24){toast('Le guide vous a poussé. Ça compte quand même.','bad',3000);doJump();}}
-  if(state==='flying'||state==='deploying'||state==='canopy'){acc+=dt;let n=0;while(acc>=H&&n<12){physicsStep(H);acc-=H;n++;if(!['flying','deploying','canopy'].includes(state))break;}}
+  if(state==='flying'||state==='deploying'||state==='canopy'){acc+=dt;let n=0;while(acc>=H&&n<14){physicsStep(H);acc-=H;n++;if(!['flying','deploying','canopy'].includes(state))break;}}
   if(state==='crashed'){P.endT+=dtR;const n=4;for(let i=0;i<n;i++)updateRag(dt/n);if(P.endT>2.6&&!endShown)showEnd();}
   if(state==='landed'){P.endT+=dtR;if(P.endT>2.4&&!endShown)showEnd();}
   updateBody(dt);recFrame(dt);updateCamera(dtR);
@@ -1712,25 +1724,38 @@ function mpSample(p){
     g.fillStyle='rgba(8,14,22,.7)';g.beginPath();g.roundRect?g.roundRect(128-w/2,8,w,46,12):g.rect(128-w/2,8,w,46);g.fill();g.fillStyle=hexCss(G.col);g.fillRect(128-w/2,8,6,46);
     g.fillStyle='#fff';g.textAlign='center';g.textBaseline='middle';g.fillText(nm,131,32);G.tex.needsUpdate=true;}
   const num=a=>Array.isArray(a)&&a.every(v=>typeof v==='number'&&isFinite(v));
-  const smp={t:performance.now(),st:String(pr.st||''),p:pr.p,q:num(pr.q)&&pr.q.length===4?pr.q:[0,0,0,1],bp:num(pr.bp)&&pr.bp.length===7?pr.bp:[1,0,.4,0,0,0,0],cv:!!pr.cv,cp:num(pr.cp)?pr.cp:null,cq:num(pr.cq)?pr.cq:null};
+  const recv=performance.now(),ts=+pr.ts;let st0=recv;
+  if(isFinite(ts)&&ts>0){const off=recv-ts;
+    // décalage d’horloge : on retient le trajet le plus rapide, avec une lente dérive pour suivre les variations
+    if(G.off==null||off<G.off||Math.abs(off-G.off)>5000)G.off=off;else G.off+=(off-G.off)*.01;st0=ts;}else G.off=0;
+  if(G.s.length&&st0<=G.s[G.s.length-1].t)return;
+  const smp={t:st0,st:String(pr.st||''),p:pr.p,q:num(pr.q)&&pr.q.length===4?pr.q:[0,0,0,1],bp:num(pr.bp)&&pr.bp.length===7?pr.bp:[1,0,.4,0,0,0,0],cv:!!pr.cv,cp:num(pr.cp)?pr.cp:null,cq:num(pr.cq)?pr.cq:null};
   if(!num(smp.p))return;
-  G.s.push(smp);if(G.s.length>4)G.s.shift();
+  G.s.push(smp);if(G.s.length>14)G.s.shift();
 }
 function mpDropGhost(peer){const G=MP.ghosts.get(peer);if(!G)return;scene.remove(G.J);scene.remove(G.C);scene.remove(G.sp);G.tex.dispose();MP.ghosts.delete(peer);}
 const _gq=new THREE.Quaternion(),_gq2=new THREE.Quaternion(),_gv=new V3(),_gB={f:1,fl:0,inc:.4,roll:0,cn:0,bL:0,bR:0},GK=['f','fl','inc','roll','cn','bL','bR'];
+const MP_DELAY=230;
 function mpGhosts(){
-  const now=performance.now()-140;
+  const pnow=performance.now();
   for(const G of MP.ghosts.values()){
-    const S2=G.s;if(!S2.length)continue;let a=S2[0],b=S2[0];
-    for(let i=0;i<S2.length;i++){if(S2[i].t<=now)a=S2[i];if(S2[i].t>=now){b=S2[i];break;}b=S2[i];}
-    const k=b.t>a.t?clamp((now-a.t)/(b.t-a.t),0,1):1;
+    const S2=G.s;if(!S2.length)continue;
+    const now=pnow-(G.off||0)-MP_DELAY;let a=S2[0],b=S2[0],k=1,kq=1;
+    if(S2.length>1&&now>=S2[S2.length-1].t){
+      // plus de nouvelles : on prolonge la trajectoire au plus 0,35 s
+      a=S2[S2.length-2];b=S2[S2.length-1];const d=b.t-a.t||1;k=1+Math.min(now-b.t,350)/d;
+    }else{
+      for(let i=0;i<S2.length;i++){if(S2[i].t<=now)a=S2[i];if(S2[i].t>=now){b=S2[i];break;}b=S2[i];}
+      k=b.t>a.t?clamp((now-a.t)/(b.t-a.t),0,1):1;kq=k;}
+    if(k>1&&b.st!=='flying'&&b.st!=='canopy'&&b.st!=='deploying')k=1;
+    kq=Math.min(k,1);
     const vis=!RP&&['ready','flying','deploying','canopy','landed','crashed'].includes(b.st);
     G.J.visible=vis;G.sp.visible=vis;G.C.visible=vis&&b.cv&&!!b.cp;if(!vis)continue;
     G.J.position.set(lerp(a.p[0],b.p[0],k),lerp(a.p[1],b.p[1],k),lerp(a.p[2],b.p[2],k));
-    _gq.fromArray(a.q);_gq2.fromArray(b.q);G.J.quaternion.copy(_gq).slerp(_gq2,k);
-    GK.forEach((n,i)=>_gB[n]=lerp(a.bp[i],b.bp[i],k));poseBody(_gB,G.J);
+    _gq.fromArray(a.q);_gq2.fromArray(b.q);G.J.quaternion.copy(_gq).slerp(_gq2,kq);
+    GK.forEach((n,i)=>_gB[n]=lerp(a.bp[i],b.bp[i],kq));poseBody(_gB,G.J);
     if(G.C.visible){const ca=a.cp||b.cp,qa=a.cq||b.cq;G.C.position.set(lerp(ca[0],b.cp[0],k),lerp(ca[1],b.cp[1],k),lerp(ca[2],b.cp[2],k));
-      _gq.fromArray(qa);_gq2.fromArray(b.cq);G.C.quaternion.copy(_gq).slerp(_gq2,k);}
+      _gq.fromArray(qa);_gq2.fromArray(b.cq);G.C.quaternion.copy(_gq).slerp(_gq2,kq);}
     G.sp.position.copy(G.J.position);G.sp.position.y+=2.2;
   }
 }
@@ -1768,7 +1793,7 @@ function mpTick(dt){
     if(left>0){const n=Math.ceil(left);cd.textContent=n;cd.style.opacity=1;if(n!==MP.cdN){MP.cdN=n;AU.init&&AU.beep&&AU.beep(660,.12);}}
     else{MP.cdEnd=0;MP.cdN=0;cd.textContent='GO !';cd.style.opacity=1;setTimeout(()=>{cd.style.opacity=0;},700);if(state==='ready')doJump();}}
   // envoi de l’état (~12 Hz)
-  if(now-MP.lastSend>80)mpSend();
+  if(now-MP.lastSend>66)mpSend();
   mpGhosts();
   if(now-MP.boardT>400){MP.boardT=now;mpBoard();if(state==="title")mpLobby();if(endShown)mpEndBoard();
     $('mpRaceBtn').classList.toggle('hidden',!(state==='ready'&&!MP.cdEnd&&mpOthers().length>0&&!RP));}
@@ -1779,7 +1804,7 @@ function mpSend(){
   {MP.lastSend=performance.now();const q=jumper.quaternion,cv=canopyG.visible;
     const pr={n:MP.nick,c:MP.col,st:RP?'replay':state,p:[r2(P.pos.x),r2(P.pos.y),r2(P.pos.z)],q:[r3(q.x),r3(q.y),r3(q.z),r3(q.w)],
       bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR].map(r2),cv,cp:cv?canopyG.position.toArray().map(r2):null,cq:cv?canopyG.quaternion.toArray().map(r3):null,
-      s:Math.round(Math.max(0,-P.pos.z)),r:MP.race?MP.race.id:null,res:MP.res,go:MP.go,
+      s:Math.round(Math.max(0,-P.pos.z)),r:MP.race?MP.race.id:null,res:MP.res,go:MP.go,ts:Math.round(performance.now()),
       dg:{v:6,via:MP.via,code:MP.code,con:MP.conn?1:0,np:MP.peers.length,nv:mpOthers().length,err:MP.err,gh:MP.ghosts.size}};
     if(RP){pr.p=[0,-9999,0];}
     MP.room.presence(pr).catch(e=>{MP.err='pres:'+(e&&e.code);});}
