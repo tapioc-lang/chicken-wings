@@ -611,31 +611,48 @@ function buildTrees(){
 }
 
 function makeJumper(){
+  // repère local : tête vers -Z, dos vers +Y, bras vers ±X
   const g=new THREE.Group();
   const suit=new THREE.MeshLambertMaterial({color:lin(0xff6a10)}),dark=new THREE.MeshLambertMaterial({color:lin(0x1e2024)});
   const wingM=new THREE.MeshLambertMaterial({color:lin(0xffc21a),side:THREE.DoubleSide});
   const skin=new THREE.MeshLambertMaterial({color:lin(0xe2ad8a)});
   const add=(geo,mat,x,y,z,p=g)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.castShadow=true;p.add(m);return m;};
-  add(new THREE.BoxGeometry(.42,.24,.72),suit,0,0,-.05);
-  add(new THREE.BoxGeometry(.36,.13,.5),dark,0,.17,0);
+  // tronc : poitrine, bassin, sac-harnais
+  add(new THREE.BoxGeometry(.42,.24,.4),suit,0,0,-.17);
+  add(new THREE.BoxGeometry(.36,.22,.32),suit,0,-.005,.17);
+  add(new THREE.BoxGeometry(.34,.14,.46),dark,0,.17,-.02);
+  add(new THREE.BoxGeometry(.3,.05,.06),dark,0,.24,-.22);
+  add(new THREE.BoxGeometry(.06,.04,.3),dark,-.12,-.13,-.1);add(new THREE.BoxGeometry(.06,.04,.3),dark,.12,-.13,-.1);
+  add(new THREE.SphereGeometry(.07,10,8),suit,0,.01,-.43);
   add(new THREE.SphereGeometry(.12,14,10),skin,0,.02,-.53);
   const helmet=new THREE.Group();helmet.position.set(0,.02,-.53);g.add(helmet);
   add(new THREE.SphereGeometry(.148,16,12),new THREE.MeshPhongMaterial({color:lin(0xf4f4f4),shininess:90}),0,.01,-.01,helmet);
   add(new THREE.BoxGeometry(.2,.07,.06),new THREE.MeshPhongMaterial({color:lin(0x10161e),shininess:120,specular:0x999999}),0,-.08,-.1,helmet);
   add(new THREE.BoxGeometry(.04,.04,.06),dark,0,.15,-.03,helmet);
-  const arms=[];
+  // bras : épaule -> coude -> poignet
+  const arms=[],fores=[];
   for(const sd of [-1,1]){
     const arm=new THREE.Group();arm.position.set(sd*.2,0,-.3);g.add(arm);arms.push(arm);
-    add(new THREE.BoxGeometry(.62,.09,.1),suit,sd*.31,0,.04,arm);
-    add(new THREE.BoxGeometry(.1,.06,.12),dark,sd*.64,0,.06,arm);
-    const wg=new THREE.BufferGeometry();
-    wg.setAttribute('position',new THREE.Float32BufferAttribute([0,0,0, sd*.66,0,.08, sd*.36,0,.52, 0,0,0, sd*.36,0,.52, sd*.02,0,.64],3));wg.computeVertexNormals();
-    const w=new THREE.Mesh(wg,wingM);w.castShadow=true;arm.add(w);
+    add(new THREE.SphereGeometry(.07,8,6),suit,0,0,0,arm);
+    add(new THREE.BoxGeometry(.34,.1,.11),suit,sd*.17,0,0,arm);
+    const fo=new THREE.Group();fo.position.set(sd*.34,0,0);arm.add(fo);fores.push(fo);
+    add(new THREE.BoxGeometry(.3,.085,.095),suit,sd*.15,0,0,fo);
+    add(new THREE.BoxGeometry(.1,.06,.12),dark,sd*.34,0,.01,fo);
   }
-  for(const sd of [-1,1]){const l=add(new THREE.BoxGeometry(.14,.14,.86),suit,sd*.13,0,.72);l.rotation.y=-sd*.08;add(new THREE.BoxGeometry(.12,.16,.18),dark,sd*.17,-.02,1.18);}
-  const lg=new THREE.BufferGeometry();lg.setAttribute('position',new THREE.Float32BufferAttribute([-.12,0,.32, .12,0,.32, .26,0,1.12, -.12,0,.32, .26,0,1.12, -.26,0,1.12],3));lg.computeVertexNormals();
-  const lw=new THREE.Mesh(lg,wingM);lw.castShadow=true;g.add(lw);
-  g.userData={arms,helmet};
+  // jambes : hanche -> genou -> pied
+  const legs=[],shins=[];
+  for(const sd of [-1,1]){
+    const leg=new THREE.Group();leg.rotation.order='YXZ';leg.position.set(sd*.11,0,.3);g.add(leg);legs.push(leg);
+    add(new THREE.BoxGeometry(.16,.16,.46),suit,0,0,.23,leg);
+    const sh=new THREE.Group();sh.position.set(0,0,.46);leg.add(sh);shins.push(sh);
+    add(new THREE.SphereGeometry(.075,8,6),suit,0,0,0,sh);
+    add(new THREE.BoxGeometry(.13,.13,.42),suit,0,0,.21,sh);
+    add(new THREE.BoxGeometry(.12,.17,.2),dark,0,-.03,.46,sh);
+  }
+  // voilures (bras + entre-jambes) : maillage déformé chaque image
+  const wg=new THREE.BufferGeometry();wg.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(30*3),3));
+  const wing=new THREE.Mesh(wg,wingM);wing.castShadow=true;wing.frustumCulled=false;g.add(wing);
+  g.userData={arms,fores,legs,shins,helmet,wing};
   return g;
 }
 function makeGuide(){
@@ -655,7 +672,7 @@ function makeCanopy(){
   const pts=[];for(let k=0;k<=6;k++){const x=-4.1+k*8.2/6,y=-Math.pow(x/4.3,2)*1.3-.28;for(const z of [-1.2,0,1.2])pts.push(x,y,z,x>0?.2:-.2,-6.75,0);}
   const lg=new THREE.BufferGeometry();lg.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
   g.add(new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x222222,transparent:true,opacity:.7})));
-  g.visible=false;return g;
+  g.rotation.order='YXZ';g.visible=false;return g;
 }
 function makeCow(){
   const g=new THREE.Group();const w=new THREE.MeshLambertMaterial({color:lin(0xf2efe8)}),b=new THREE.MeshLambertMaterial({color:lin(0x2a2420)}),pk=new THREE.MeshLambertMaterial({color:lin(0xe8a3a0)});
@@ -1342,22 +1359,69 @@ function updateCamera(dt){
 
 /* ================= BODY VISUALS ================= */
 const _qa=new THREE.Quaternion(),_qb=new THREE.Quaternion();
-function setFold(f,flail=0){const[aL,aR]=jumper.userData.arms;const fl=flail?Math.sin(time*22)*.7*flail:0;aL.rotation.set(fl,Math.PI/2*f*.92,0);aR.rotation.set(-fl,-Math.PI/2*f*.92,0);}
+/* BP : f = bras repliés (falaise), fl = gesticulation, inc = incidence 0..1, roll = virage -1..1,
+   cn = sous voile 0..1, bL/bR = freins gauche/droit 0..1 */
+const BP={f:1,fl:0,inc:.4,roll:0,cn:0,bL:0,bR:0};
+const _bw=[...Array(14)].map(()=>new V3());
+function poseBody(B){
+  const u=jumper.userData,[aL,aR]=u.arms,[fL,fR]=u.fores,[lL,lR]=u.legs,[sL,sR]=u.shins;
+  const fl=B.fl?B.fl:0,sw=t=>fl?Math.sin(time*t)*fl:0,flut=(1-B.f)*(1-B.cn);
+  // bras : en vol, balayés vers l’arrière quand on pique, en croix à forte incidence ; sous voile, mains aux commandes
+  for(const sd of [-1,1]){const a=sd<0?aL:aR,fo=sd<0?fL:fR,br=sd<0?B.bL:B.bR;
+    const yF=lerp(.42,.04,B.inc),yC=lerp(-1.2,.95,br);
+    let y=lerp(lerp(yF,yC,B.cn),1.45,B.f)+sw(19+sd)*.9;
+    const dip=lerp(.04+B.inc*.1+sd*B.roll*.24+Math.sin(time*11+sd)*.012*flut,0,B.cn)*(1-B.f);
+    a.rotation.set(sw(23)*.7*sd,-sd*y,-sd*dip);
+    fo.rotation.set(0,-sd*(lerp(lerp(.05,.12,B.inc),.75,B.cn)*(1-B.f)+sw(17)*.6),0);}
+  // jambes : écartées en vol, poussées vers le ventre pour cabrer ; serrées et relevées à l’arrondi
+  const fb=(B.bL+B.bR)/2;
+  for(const sd of [-1,1]){const l=sd<0?lL:lR,s=sd<0?sL:sR;
+    const spread=lerp(lerp(lerp(.13,.31,B.inc),.07+.05*(1-fb),B.cn),.06,B.f);
+    const droop=lerp(lerp(lerp(-.05,.34,B.inc)+sd*B.roll*.16+Math.sin(time*13+sd*2)*.015*flut,.12+fb*.75+Math.sin(time*1.7)*.04,B.cn),0,B.f)+sw(15+sd*3)*.8;
+    const knee=lerp(lerp(lerp(.02,.3,B.inc),.3+fb*.5,B.cn),0,B.f)+Math.abs(sw(21))*.9;
+    l.rotation.set(droop,sd*spread,0);s.rotation.set(-knee,0,0);}
+  // voilures
+  const p=u.wing.geometry.attributes.position,W=_bw;let k=0;
+  const pt=(o,x,y,z,out)=>{out.set(x,y,z);let n=o;while(n&&n!==jumper){n.updateMatrix();out.applyMatrix4(n.matrix);n=n.parent;}return out;};
+  const tri=(a,b,c)=>{for(const v of [a,b,c])p.setXYZ(k++,v.x,v.y,v.z);};
+  const open=1-B.f*.85;
+  for(const sd of [-1,1]){const a=sd<0?aL:aR,fo=sd<0?fL:fR;
+    const S=pt(jumper,sd*.19,0,-.27,W[0]),E=pt(a,sd*.34,0,.045,W[1]),Wr=pt(fo,sd*.3,0,.045,W[2]),H=pt(jumper,sd*.18,0,.34,W[3]);
+    const T=W[4].copy(Wr).lerp(H,.5);T.x=lerp(T.x,sd*.2,.35);T.y-=.02;T.lerp(W[5].copy(S).lerp(H,.6),1-open);
+    tri(S,E,Wr);tri(S,Wr,T);tri(S,T,H);}
+  const C=pt(jumper,0,-.02,.3,W[6]);
+  const Lk=pt(sL,-.05,0,0,W[7]),Lf=pt(sL,-.05,0,.42,W[8]),Rk=pt(sR,.05,0,0,W[9]),Rf=pt(sR,.05,0,.42,W[10]);
+  const M=W[11].copy(Lf).lerp(Rf,.5);M.z=lerp(M.z,C.z,.18);M.y+=.015;
+  tri(C,Rk,Rf);tri(C,Rf,M);tri(C,M,Lf);tri(C,Lf,Lk);
+  p.needsUpdate=true;u.wing.geometry.computeVertexNormals();
+}
+function setBP(f,fl,inc,roll,cn,bL,bR){BP.f=f;BP.fl=fl;BP.inc=inc;BP.roll=roll;BP.cn=cn;BP.bL=bL;BP.bR=bR;poseBody(BP);}
+const _qs=new THREE.Quaternion(),_qp=new THREE.Quaternion();
+/* inclinaison du système voile+pilote : en virage la voile s’incline vers l’intérieur, le pilote part à l’extérieur ;
+   à l’arrondi la voile se cabre et le pilote passe devant */
+function canopySys(k,out){const h=P.heading;
+  out.setFromAxisAngle(_t1.set(Math.sin(h),0,-Math.cos(h)),P.turn*.42*k);
+  _qp.setFromAxisAngle(_t1.set(Math.cos(h),0,Math.sin(h)),(P.flare*.32+Math.sin(time*1.3)*.015)*k);
+  return out.multiply(_qp);}
 function updateBody(dt){
   jumper.position.copy(P.pos);
-  if(state==='ready'||state==='title'){hangQuat(P.heading,_qa);jumper.quaternion.copy(_qa);setFold(1);}
-  else if(state==='flying'){if(P.blend<1){hangQuat(0,_qa);jumper.quaternion.copy(_qa).slerp(P.qFlight,sstep(0,1,P.blend));}else jumper.quaternion.copy(P.qFlight);setFold(1-sstep(0,.8,P.blend));}
-  else if(state==='deploying'){hangQuat(P.heading,_qa);jumper.quaternion.copy(P.qFlight).slerp(_qa,sstep(.5,1.6,P.deployT));setFold(sstep(.3,1,P.deployT)*.55);}
-  else if(state==='canopy'||state==='landed'){hangQuat(P.heading,_qa);_qb.setFromAxisAngle(_t1.set(Math.sin(P.heading),0,-Math.cos(P.heading)),-P.turn*.35);
-    jumper.quaternion.copy(_qb).multiply(_qa);setFold(.55+P.flare*.3);
+  const incN=clamp((P.alpha-5)/15,0,1),rollN=clamp((P.bank||0)/72,-1,1);
+  if(state==='ready'||state==='title'){hangQuat(P.heading,_qa);jumper.quaternion.copy(_qa);setBP(1,0,.4,0,0,0,0);}
+  else if(state==='flying'){if(P.blend<1){hangQuat(0,_qa);jumper.quaternion.copy(_qa).slerp(P.qFlight,sstep(0,1,P.blend));}else jumper.quaternion.copy(P.qFlight);setBP(1-sstep(0,.8,P.blend),0,incN,rollN,0,0,0);}
+  else if(state==='deploying'){hangQuat(P.heading,_qa);jumper.quaternion.copy(P.qFlight).slerp(_qa,sstep(.5,1.6,P.deployT));setBP(0,0,incN,0,sstep(.3,1.2,P.deployT),0,0);}
+  else if(state==='canopy'||state==='landed'){hangQuat(P.heading,_qa);canopySys(state==='canopy'?1:Math.max(0,1-P.endT*2),_qs);
+    jumper.quaternion.copy(_qs).multiply(_qa);
+    setBP(0,0,0,0,1,clamp(P.flare+Math.max(0,-P.turn)*.9,0,1),clamp(P.flare+Math.max(0,P.turn)*.9,0,1));
     if(state==='landed'&&P.landKind==='rough'&&P.endT<1.2){_qb.setFromAxisAngle(_t1.set(Math.cos(P.heading),0,Math.sin(P.heading)),-P.endT*5.2);jumper.quaternion.premultiply(_qb);}
     if(state==='landed'&&P.landKind==='hard'){_qb.setFromAxisAngle(_t1.set(Math.cos(P.heading),0,Math.sin(P.heading)),-Math.min(1,P.endT*3)*1.45);jumper.quaternion.premultiply(_qb);}}
-  else if(state==='crashed'){jumper.quaternion.copy(P.quat);setFold(.2,P.rag&&P.rag.vel.length()>2?1:0);}
+  else if(state==='crashed'){jumper.quaternion.copy(P.quat);setBP(.2,P.rag&&P.rag.vel.length()>2?1:0,.3,0,0,0,0);}
   // canopy rig
   if(canopyG.visible){
     if(state==='deploying'){const k=sstep(.35,2.3,P.deployT);const wob=1+Math.sin(P.deployT*14)*.12*(1-k);canopyG.scale.set(lerp(.06,1,k)*wob,lerp(.2,1,k),lerp(.15,1,k)*wob);
       const back=_t1.copy(P.vel).normalize().multiplyScalar(-(1-k)*9);canopyG.position.copy(P.pos).add(back).add(_t2.set(0,lerp(2,7,k),0));canopyG.rotation.set(0,-P.heading,0);}
-    else if(state==='canopy'){canopyG.position.copy(P.pos).add(_t1.set(-Math.sin(P.heading)*P.flare*.8,7,Math.cos(P.heading)*P.flare*.8));canopyG.rotation.set(-P.flare*.25,-P.heading,P.turn*.28,'YXZ');canopyG.scale.set(1,1,1);}
+    else if(state==='canopy'){/* pilote et voile forment un pendule rigide pivotant autour du pilote */
+      canopyG.position.copy(P.pos).add(_t1.set(0,7,0).applyQuaternion(_qs));
+      _qb.setFromAxisAngle(_U.set(0,1,0),-P.heading);canopyG.quaternion.copy(_qs).multiply(_qb);canopyG.scale.set(1,1,1);}
     else if(state==='landed'||state==='crashed'){const k=Math.min(1,P.endT/1.8);const g=groundH(canopyG.position.x,canopyG.position.z)+.4;canopyG.position.y=lerp(canopyG.position.y,g,1-Math.exp(-dt*1.5));canopyG.rotation.x=lerp(canopyG.rotation.x,-1.3,1-Math.exp(-dt*1.2));canopyG.scale.y=lerp(1,.25,k);}
   }
   // guide
@@ -1370,7 +1434,7 @@ function recFrame(dt){
   if(RP||endShown||!REC_STATES.includes(state))return;
   REC.t+=dt;REC.acc+=dt;if(REC.acc<1/30&&REC.frames.length)return;REC.acc=0;
   const q=jumper.quaternion,aL=jumper.userData.arms[0],h=jumper.userData.helmet,det=h.parent!==jumper,cv=canopyG.visible;
-  REC.frames.push({t:REC.t,p:[P.pos.x,P.pos.y,P.pos.z],q:[q.x,q.y,q.z,q.w],ax:aL.rotation.x,ay:aL.rotation.y,cv,
+  REC.frames.push({t:REC.t,p:[P.pos.x,P.pos.y,P.pos.z],q:[q.x,q.y,q.z,q.w],bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR],cv,
     cp:cv?canopyG.position.toArray():null,cr:cv?[canopyG.rotation.x,canopyG.rotation.y,canopyG.rotation.z]:null,cs:cv?canopyG.scale.toArray():null,
     hp:det?[h.position.x,h.position.y,h.position.z,h.rotation.x,h.rotation.y,h.rotation.z]:null});
 }
@@ -1382,7 +1446,7 @@ function recVel(t,out){const [a]=frameAt(t-.15),[b]=frameAt(t+.15);const d=b.t-a
 const _rq=new THREE.Quaternion(),_rq2=new THREE.Quaternion();
 function applyRec(t){const [a,b,k]=frameAt(t);
   recPos(t,jumper.position);_rq.fromArray(a.q);_rq2.fromArray(b.q);jumper.quaternion.copy(_rq).slerp(_rq2,k);
-  const[aL,aR]=jumper.userData.arms;aL.rotation.set(a.ax,a.ay,0);aR.rotation.set(-a.ax,-a.ay,0);
+  const bp=b.bp?a.bp.map((v,i)=>lerp(v,b.bp[i],k)):a.bp;setBP(...bp);
   canopyG.visible=a.cv;if(a.cv){canopyG.position.fromArray(a.cp);if(b.cp)canopyG.position.lerp(_t2.fromArray(b.cp),k);canopyG.rotation.set(a.cr[0],a.cr[1],a.cr[2],'YXZ');canopyG.scale.fromArray(a.cs);}
   const h=jumper.userData.helmet;
   if(a.hp){if(h.parent===jumper){jumper.remove(h);scene.add(h);}h.position.set(a.hp[0],a.hp[1],a.hp[2]);h.rotation.set(a.hp[3],a.hp[4],a.hp[5]);}
