@@ -283,9 +283,9 @@ let _seed=1337;function rnd(){_seed=(_seed*16807)%2147483647;return (_seed-1)/21
    Tracé : falaise → gorge des Ciseaux → trouée en forêt → arche du Diable → bassin 1 (ascendances) → col des Choucas
    → arche perchée de la Serrure → bassin 2 (ascendances) → col du Dernier Espoir → prairie.
    Le budget d'altitude est calé sur la finesse max (~2,8) : sans exploiter les ascendances, on arrive sous les cols. */
-const FLOOR=[[-1500,1450],[-700,1650],[-150,1840],[0,1850],[40,1500],[150,1462],[400,1390],[560,1360],[830,1280],[1350,1035],[1395,1028],[1450,880],[1520,790],[1800,670],[2150,650],[2300,680],[2450,728],[2530,705],[2700,620],[2900,500],[2950,490],[2995,485],[3050,375],[3300,360],[3580,345],[3720,395],[3850,442],[3930,432],[4150,230],[4300,170],[4650,165],[4850,450],[5000,1350]];
-const WID=[[-1500,600],[0,520],[120,280],[350,110],[410,42],[540,42],[600,115],[830,216],[1100,173],[1270,90],[1335,40],[1400,38],[1470,55],[1560,101],[1700,119],[1950,119],[2140,60],[2260,79],[2370,90],[2450,30],[2520,60],[2650,130],[2820,72],[2910,40],[2990,40],[3060,80],[3200,158],[3500,137],[3760,90],[3850,30],[3930,70],[4100,300],[4300,520],[5000,520]];
-const MOUNT=[[-1500,600],[-100,500],[300,1000],[1350,900],[1500,800],[2450,780],[2950,820],[3850,720],[4300,700],[5000,600]];
+const FLOOR=[[-1500,1250],[-700,1560],[-150,1790],[0,1850],[40,1500],[150,1462],[400,1390],[560,1360],[830,1280],[1350,1035],[1395,1028],[1450,880],[1520,790],[1800,670],[2150,650],[2300,680],[2450,728],[2530,705],[2700,620],[2900,500],[2950,490],[2995,485],[3050,375],[3300,360],[3580,345],[3720,395],[3850,442],[3930,432],[4150,230],[4300,170],[4650,165],[4850,450],[5000,1350]];
+const WID=[[-1500,420],[-150,240],[0,190],[120,160],[350,110],[410,42],[540,42],[600,115],[830,216],[1100,173],[1270,90],[1335,40],[1400,38],[1470,55],[1560,101],[1700,119],[1950,119],[2140,60],[2260,79],[2370,90],[2450,30],[2520,60],[2650,130],[2820,72],[2910,40],[2990,40],[3060,80],[3200,158],[3500,137],[3760,90],[3850,30],[3930,70],[4100,300],[4300,520],[5000,520]];
+const MOUNT=[[-1500,260],[-100,150],[300,260],[800,400],[1350,520],[1500,650],[2450,780],[2950,820],[3850,720],[4300,700],[5000,600]];
 // axe de la vallée : virages successifs (cubique monotone → pas de dépassement)
 const XCT=[[-1500,0],[0,0],[120,0],[400,150],[640,30],[830,-60],[1100,60],[1350,0],[1500,-25],[1720,-150],[1900,-230],[2200,-100],[2450,60],[2700,160],[2950,60],[3200,-110],[3500,-180],[3850,20],[4100,170],[4350,150],[5000,150]];
 // resserrements à parois raides : gorge des Ciseaux, entonnoirs des deux arches
@@ -305,7 +305,7 @@ function tab(T,s){if(s<=T[0][0])return T[0][1];
     return (2*t3-3*t2+1)*a[1]+(t3-2*t2+t)*h*T.m[i]+(-2*t3+3*t2)*b[1]+(t3-t2)*h*T.m[i+1];}}return T[T.length-1][1];}for(let i=0;i<T.length-1;i++){const a=T[i],b=T[i+1];if(s<=b[0]){const t=(s-a[0])/(b[0]-a[0]);const k=(1-Math.cos(t*Math.PI))*.5;return a[1]+(b[1]-a[1])*k;}}return T[T.length-1][1];}
 function xc(s){return tab(XCT,s);}
 const LANE_S0=830, LANE_HW=24;
-function laneX(s){return xc(s)+42*Math.sin((s-LANE_S0)/95)*(1-sstep(1170,1310,s));}
+function laneX(s){return xc(s)+42*Math.sin((s-LANE_S0)/95)*(1-sstep(1170,1310,s))+35*(1-sstep(LANE_S0,LANE_S0+260,s));}
 /* arêtes rocheuses percées d’une arche naturelle */
 const WALLS=[{s:1350,a:21,b:50,top0:1450,name:'Arche du Diable',short:'ARCHE DU DIABLE'},{s:2950,a:18,b:42,top0:1060,sillAbs:500,name:'Arche de la Serrure',short:'ARCHE DE LA SERRURE'}];
 WALLS.forEach(w=>{w.half=22;w.zc=-(w.s+w.half);w.x=xc(w.s);w.y=0;});
@@ -328,6 +328,11 @@ function riverX(s){const w=tab(WID,s);return xc(s)+Math.min(1,Math.max(0,(w-25)/
 function inRiver(s){for(const r of RIVERS)if(s>=r[0]&&s<=r[1])return true;return false;}
 function lakeAt(x,s){for(const L of LAKES)if(Math.hypot(x-L.x,s-L.s)<L.r+30)return L;return null;}
 
+/* le point de départ reste le sommet du massif : plafond doux qui descend en s'éloignant de la plate-forme */
+function capH(h,x,s){const de=Math.hypot(x-EXIT.x,s-EXIT.s),g=gorgeK(s);
+  // la gorge des Ciseaux garde des parois trop hautes pour être survolées (mais sous le départ)
+  const C=lerp(EXIT.h-40-170*(1-Math.exp(-de/200))-.05*de,EXIT.h-150,g),kw=lerp(200,90,g),K=C-kw;
+  if(h<=K)return h;const c=K+kw*Math.tanh((h-K)/kw);return lerp(h,c,sstep(8,120,de));}
 function heightFn(x,s){
   const f=tab(FLOOR,s),w=tab(WID,s),M=tab(MOUNT,s);
   const d=Math.abs(x-xc(s)), e=Math.max(0,d-w);
@@ -356,6 +361,7 @@ function heightFn(x,s){
   h+=fbm(x*.02+11,s*.02+5,3)*(1.5+7*sl);
   const dfds=Math.abs(tab(FLOOR,s+3)-tab(FLOOR,s-3))/6;
   if(dfds>.8)h+=fbm(x*.03+40,s*.03,3)*Math.min(dfds,14)*3.5;
+  h=capH(h,x,s);
   if(s<2){const de=Math.hypot(x-EXIT.x,s-EXIT.s);const k=(1-sstep(14,40,de))*(1-sstep(-.5,2,s));if(k>0)h+=(EXIT.h-h)*k;}
   const dt=Math.hypot(x-TARGET.x,s-TARGET.s);if(dt<170){const k=1-sstep(80,170,dt);h+=(TARGET.h-h)*k;}
   return h;
@@ -370,7 +376,9 @@ function groundH(x,z){const s=-z;let fx=(x-GX0)/GD,fs=(s-GS0)/GD;fx=clamp(fx,0,G
 function groundNormal(x,z,out){const e=2;const hx=groundH(x+e,z)-groundH(x-e,z),hz=groundH(x,z+e)-groundH(x,z-e);return out.set(-hx,2*e,-hz).normalize();}
 
 /* arêtes rocheuses entaillées d'une brèche : fente ouverte jusqu'au ciel, parois inclinées vers l'arrière (aucun surplomb) */
-function wallTop(W,x){return W.top0+.42*Math.abs(x-W.x)+45*fbm(x*.006+9.1+W.s*.01,3.3,4)+40*ridged(x*.014+W.s*.003,1.7,3);}
+function wallTop(W,x){const raw=capH(W.top0+.42*Math.abs(x-W.x)+45*fbm(x*.006+9.1+W.s*.01,3.3,4)+40*ridged(x*.014+W.s*.003,1.7,3),x,W.s);
+  // l'arête ne dépasse jamais franchement le relief qui l'encadre (sauf au-dessus de l'arche)
+  return Math.min(raw,Math.max(W.top0+60,heightFn(x,W.s+W.half)+35));}
 /* arche naturelle (type Étretat) : ouverture haute et arrondie, contour irrégulier, tronquée par le sol / le seuil */
 function archR(W,x,y){const th=Math.atan2((y-W.cy)/W.b,(x-W.x)/W.a);return 1+.08*vnoise(th*2.2+W.s,1.3)+.04*vnoise(th*6.5,W.s*.1);}
 function archQ(W,x,y){const dx=(x-W.x)/W.a,dy=(y-W.cy)/W.b;return Math.sqrt(dx*dx+dy*dy)/archR(W,x,y);}
@@ -1397,12 +1405,14 @@ function updateCamera(dt){
     if(camMode===1&&state==='flying'){camera.position.copy(P.pos).addScaledVector(P.upB,.32).addScaledVector(P.fwd,-.35);camera.up.copy(P.upB);camera.lookAt(_t2.copy(P.pos).addScaledVector(P.fwd,30).addScaledVector(P.upB,2));fov=80;}
     else{
       let want;
-      if(state==='canopy'||(state==='deploying'&&P.deployT>.8)){const f=_t2.set(Math.sin(P.heading),0,-Math.cos(P.heading));want=_v.copy(f).multiplyScalar(-11).add(_U.set(0,4.5,0));}
+      // sous voile : caméra de suivi haute, plongeante, pour voir le sol et la cible (redevient rasante à l'approche)
+      const cAgl=P.pos.y-groundH(P.pos.x,P.pos.z),ck=sstep(12,70,cAgl);
+      if(state==='canopy'||(state==='deploying'&&P.deployT>.8)){const f=_t2.set(Math.sin(P.heading),0,-Math.cos(P.heading));want=_v.copy(f).multiplyScalar(-11-5*ck).add(_U.set(0,4.5+9*ck,0));}
       else want=_v.copy(dir).multiplyScalar(-10.5).add(_U.set(0,2.4,0));
       camOff.lerp(want,1-Math.exp(-dt*(state==='flying'?5:2.5)));
       camera.position.copy(P.pos).add(camOff);
       const gmin=groundH(camera.position.x,camera.position.z)+1.2;if(camera.position.y<gmin)camera.position.y=gmin;
-      const look=state==='flying'?_t2.copy(P.pos).addScaledVector(dir,18).add(_U.set(0,1.2,0)):_t2.copy(P.pos).add(_U.set(Math.sin(P.heading)*14,2.5,-Math.cos(P.heading)*14));
+      const look=state==='flying'?_t2.copy(P.pos).addScaledVector(dir,18).add(_U.set(0,1.2,0)):_t2.copy(P.pos).add(_U.set(Math.sin(P.heading)*(14+10*ck),2.5-24*ck,-Math.cos(P.heading)*(14+10*ck)));
       camLook.lerp(look,1-Math.exp(-dt*8));
       const upT=state==='flying'?_U.copy(UP).lerp(P.upB,.28).normalize():UP;camera.up.lerp(upT,1-Math.exp(-dt*4));
       camera.lookAt(camLook);
