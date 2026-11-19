@@ -201,10 +201,10 @@ body.touch #mpReady{bottom:140px;font-size:13px}
     <div id="gyroInd"><div id="gyroDot"></div><div class="lb">INCLINEZ</div></div>
     <button id="btnAct">SAUTER</button>
     <button id="btnDrop" style="display:none">🪂<i>3</i></button>
-    <div id="tbar"><button id="tbPause" title="Pause">⏸</button><button id="tbCam" title="Caméra">🎥</button><button id="tbReset" title="Recommencer">↺</button><button id="tbMode" title="Pastille / gyroscope">📱</button><button id="tbCal" title="Recalibrer">🎯</button></div>
+    <div id="tbar"><button id="tbPause" title="Pause">⏸</button><button id="tbCam" title="Caméra">🎥</button><button id="tbBack" title="Vol sur le dos">🙃</button><button id="tbReset" title="Recommencer">↺</button><button id="tbMode" title="Pastille / gyroscope">📱</button><button id="tbCal" title="Recalibrer">🎯</button></div>
     <div id="cpRow"><span>Départ en vol :</span><button data-cp="2">Forêt</button><button data-cp="3">Arche 1</button><button data-cp="4">Col 1</button><button data-cp="5">Arche 2</button></div>
   </div>
-  <div id="help" class="panel"><kbd>↑</kbd><kbd>↓</kbd> régler l'incidence · <kbd>←</kbd><kbd>→</kbd> virer · <kbd>Espace</kbd> sauter / parachute · <kbd>B</kbd> leurre · <kbd>C</kbd> caméra · <kbd>R</kbd> recommencer · <kbd>P</kbd> pause</div>
+  <div id="help" class="panel"><kbd>↑</kbd><kbd>↓</kbd> régler l'incidence · <kbd>←</kbd><kbd>→</kbd> virer · <kbd>Espace</kbd> sauter / parachute · <kbd>B</kbd> leurre · <kbd>F</kbd> sur le dos · <kbd>C</kbd> caméra · <kbd>R</kbd> recommencer · <kbd>P</kbd> pause</div>
 </div>
 
 <div id="titleScreen" class="screen">
@@ -225,6 +225,7 @@ body.touch #mpReady{bottom:140px;font-size:13px}
       <div></div><div style="opacity:.7;font-size:12px">L'incidence reste là où vous la laissez : réglez-la, puis lâchez la touche.</div>
       <div><kbd>←</kbd><kbd>→</kbd> / <kbd>Q</kbd><kbd>D</kbd></div><div>Virer (en wingsuit et sous voile)</div>
       <div><kbd>Espace</kbd></div><div>Sauter · Ouvrir le parachute</div>
+      <div><kbd>F</kbd></div><div>Vol sur le dos (vue arrière, pour surveiller les poursuivants) · F à nouveau : retour sur le ventre</div>
       <div><kbd>B</kbd></div><div>Larguer un leurre (3 par saut) : un petit parachute qui piège les poursuivants</div>
       <div><kbd>C</kbd> · <kbd>R</kbd> · <kbd>P</kbd></div><div>Caméra · Recommencer · Pause</div>
     </div>
@@ -796,7 +797,7 @@ const TRAIL={N:4200,i:0,em:new Map()};
     vertexShader:`attribute float size;attribute vec4 rgba;attribute float rot;varying vec4 vC;varying float vR;uniform float pscale;
       #include <fog_pars_vertex>
       void main(){vC=rgba;vR=rot;vec4 mvPosition=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*mvPosition;
-        vC.a*=smoothstep(3.,14.+size,-mvPosition.z); // transparente quand la caméra la traverse
+        vC.a*=smoothstep(4.,22.+size*1.5,-mvPosition.z); // transparente quand la caméra la traverse
         gl_PointSize=rgba.a<=0.?0.:clamp(size*pscale/max(-mvPosition.z,.1),0.,512.);
         #include <fog_vertex>
       }`,
@@ -1282,6 +1283,7 @@ function onKey(code){const e={code};
   if(endShown&&!RP&&(code==='KeyV'||code==='KeyN'||code==='Tab')&&specAvail().length){specEnter();return;}
   if(e.code==='Space'){if(state==='title')startGame();else if(state==='ready')doJump();else if(state==='flying')deploy();}
   if(e.code==='KeyB'&&!RP)dropLure();
+  if(e.code==='KeyF'&&!RP)toggleBack();
   if(RP&&(e.code==='Escape'||e.code==='Enter')){stopReplay(true);return;}
   if(RP&&(e.code==='KeyV'||e.code==='KeyC')){rpView();return;}
   if(endShown&&!RP&&/^(Digit|Numpad)\d$/.test(e.code)){const n=+e.code.slice(-1);if(n===0)startReplay(null);else if(RPLIST[n-1])startReplay(RPLIST[n-1]);return;}
@@ -1353,7 +1355,7 @@ function actLabel(){let l='',c='';
   if(BA.textContent!==l)BA.textContent=l;BA.className=c;
   $('cpRow').style.display=state==='ready'?'':'none';}
 const tap=(id,fn)=>$(id).addEventListener('click',e=>{e.preventDefault();fn();});
-tap('tbPause',()=>onKey('KeyP'));tap('tbCam',()=>onKey('KeyC'));tap('tbReset',()=>onKey('KeyR'));tap('tbCal',()=>gyroCal(true));
+tap('tbPause',()=>onKey('KeyP'));tap('tbBack',()=>onKey('KeyF'));tap('tbCam',()=>onKey('KeyC'));tap('tbReset',()=>onKey('KeyR'));tap('tbCal',()=>gyroCal(true));
 tap('tbMode',()=>setMode(ctlMode==='gyro'?'pad':'gyro',true));
 document.querySelectorAll('#cpRow button').forEach(b=>b.addEventListener('click',()=>{onKey('Digit'+b.dataset.cp);gyroCal();}));
 document.querySelectorAll('#ctlMode button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.m,false)));
@@ -1382,7 +1384,7 @@ function startGame(){if(state!=='title')return;document.body.classList.add('play
 function resetRun(){
   if(SPEC.on)specExit(false);
   state='ready';paused=false;endShown=false;practice=false;$('pauseScreen').classList.add('hidden');$('endScreen').classList.add('hidden');
-  P.heading=0;P.pos.set(EXIT.x,groundH(EXIT.x,EXIT.z)+1.15,EXIT.z);mpPlaceStart(true);P.vel.set(0,0,0);P.alpha=11;P.trim=11;P.bank=0;P.rightH.set(1,0,0);P.idle=0;P.blend=0;P.rag=null;P.crashCause=null;P.flare=0;P.flareHold=0;P.turn=0;P.landKind=null;P.tangle=0;dropLeft=DROP_MAX;myDrops=[];MP.tg=null;pickAirLayout();
+  P.heading=0;P.pos.set(EXIT.x,groundH(EXIT.x,EXIT.z)+1.15,EXIT.z);mpPlaceStart(true);P.vel.set(0,0,0);P.alpha=11;P.trim=11;P.bank=0;P.rightH.set(1,0,0);P.idle=0;P.blend=0;P.rag=null;P.crashCause=null;P.flare=0;P.flareHold=0;P.turn=0;P.landKind=null;P.tangle=0;P.back=false;P.backT=0;dropLeft=DROP_MAX;myDrops=[];MP.tg=null;pickAirLayout();
   for(const D of DROPS)if(D.own||D.att)D.dead=true;
   hangQuat(0,P.quat);canopyG.visible=false;canopyG.scale.set(1,1,1);canopyG.rotation.set(0,0,0);
   const h=jumper.userData.helmet;if(h.parent!==jumper){h.parent.remove(h);jumper.add(h);h.position.set(0,.02,-.53);h.rotation.set(0,0,0);h.userData.vel=null;}
@@ -1403,7 +1405,7 @@ function warp(n){
   const cp={2:{s:740,dy:70,sp:50},3:{s:WALLS[0].s+70,dy:0,sp:46},4:{s:COLS[0].s+60,dy:0,sp:44},5:{s:WALLS[1].s+70,dy:0,sp:46}}[n];if(!cp)return;
   cp.y=n===3?WALLS[0].y:n===5?WALLS[1].y:n===4?COLS[0].need+40:tab(FLOOR,cp.s)+cp.dy;
   recReset();if(n>=3)S.gorge=true;
-  practice=true;state='flying';P.blend=1;const x=n===3?WALLS[0].x:n===5?WALLS[1].x:xc(cp.s);
+  practice=true;state='flying';P.blend=1;P.back=false;P.backT=0;const x=n===3?WALLS[0].x:n===5?WALLS[1].x:xc(cp.s);
   P.pos.set(x,cp.y,-cp.s);P.vel.set(0,-cp.sp*.33,-cp.sp*.94);P.alpha=11;P.trim=11;P.bank=0;P.rightH.set(1,0,0);P.prevZ=P.pos.z;
   if(n>=3){S.holes[0]=true;S.lane=true;S.gorge=true;}if(n>=4)S.cols[0]=true;if(n>=5)S.holes[1]=true;S.flags.flying=1;
   camPos.copy(P.pos).add(_t1.set(0,3,12));
@@ -1412,7 +1414,7 @@ function warp(n){
 function deploy(){
   if(state!=='flying'||P.blend<.5)return;
   const agl=P.pos.y-groundH(P.pos.x,P.pos.z),sp=P.vel.length();
-  state='deploying';P.deployT=0;S.deployAgl=agl;S.deploySpd=sp;P.heading=Math.atan2(P.vel.x,-P.vel.z);
+  state='deploying';P.deployT=0;P.back=false;S.deployAgl=agl;S.deploySpd=sp;P.heading=Math.atan2(P.vel.x,-P.vel.z);
   canopyG.visible=true;canopyG.scale.set(.05,.05,.05);AU.pop();
   if(agl<60)toast('Ouverture à '+Math.round(agl)+' m… on croise les doigts.','bad');
   else if(sp>65)toast('Ouverture à '+Math.round(sp*3.6)+' km/h : vos vertèbres vous envoient une carte postale.','warn',3200);
@@ -1441,13 +1443,20 @@ function stepWingsuit(h,ctl){
   const b=P.bank*DEG;_R.copy(_Rh).multiplyScalar(Math.cos(b)).addScaledVector(_U,-Math.sin(b));
   _L.crossVectors(_R,_F).normalize();
   const rho=1.225*Math.exp(-P.pos.y/8500),q=.5*rho*sp*sp,[CL,CD]=aero(P.alpha,sp),k=q*WS.S/WS.m;
-  P.vel.addScaledVector(_L,k*CL*h).addScaledVector(_F,-k*CD*h);P.vel.y-=9.81*h;
+  P.backT=clamp((P.backT||0)+((P.back?1:0)-(P.backT||0))*Math.min(1,h*4.5),0,1);const bk=P.backT;
+  P.vel.addScaledVector(_L,k*CL*h*(1-.28*bk)).addScaledVector(_F,-k*CD*h*(1+.18*bk));P.vel.y-=9.81*h;
   if(P.tangle>0){P.tangle-=h;P.vel.multiplyScalar(1-1.15*h);P.bank+=Math.sin(time*8.3)*90*h;}
   P.pos.addScaledVector(P.vel,h);
   const a=(P.alpha+(P.stalled?Math.sin(P.buf*9)*25:0))*DEG;P.fwd.copy(_F).multiplyScalar(Math.cos(a)).addScaledVector(_L,Math.sin(a)).normalize();
   P.upB.crossVectors(_R,P.fwd).normalize();P.right.crossVectors(P.fwd,P.upB).normalize();
   _M.makeBasis(P.right,P.upB,_t1.copy(P.fwd).negate());P.qFlight.setFromRotationMatrix(_M);
+  if(bk>.001){_qBack.setFromAxisAngle(_ZB,Math.PI*sstep(0,1,bk));P.qFlight.multiply(_qBack);}
   return _w.y;
+}
+const _qBack=new THREE.Quaternion(),_ZB=new V3(0,0,1);
+function toggleBack(){
+  if(state!=='flying'||RP)return;P.back=!P.back;
+  toast(P.back?'🙃 Vol sur le dos — vue arrière':'🙂 Retour sur le ventre — vue avant','fun',1600);AU.whoosh&&AU.whoosh();
 }
 function canopyTarget(out){const f=P.flare*(1-sstep(1.4,2.5,P.flareHold));const stall=P.flareHold>3.0;
   const vf=stall?1.5:lerp(10.5,2.6,f),vs=stall?8.5:lerp(4.8,1.1,f)+Math.abs(P.turn)*1.8;
@@ -1757,19 +1766,21 @@ function updateCamera(dt){
   else if(state==='ready'){const t=_t1.set(P.pos.x+2.4,P.pos.y+1.4,P.pos.z+5.6);camPos.lerp(t,1-Math.exp(-dt*3));camera.position.copy(camPos);camera.up.set(0,1,0);camera.lookAt(P.pos.x-.5,P.pos.y-12,P.pos.z-60);}
   else if(state==='flying'||state==='deploying'||state==='canopy'){
     const dir=sp>4?_t1.copy(P.vel).divideScalar(sp):_t1.set(0,-.3,-1).normalize();
-    if(camMode===1&&state==='flying'){camera.position.copy(P.pos).addScaledVector(P.upB,.32).addScaledVector(P.fwd,-.35);camera.up.copy(P.upB);camera.lookAt(_t2.copy(P.pos).addScaledVector(P.fwd,30).addScaledVector(P.upB,2));fov=80;}
+    const bb=state==='flying'?sstep(0,1,P.backT||0):0;
+    if(camMode===1&&state==='flying'&&bb<.02){camera.position.copy(P.pos).addScaledVector(P.upB,.32).addScaledVector(P.fwd,-.35);camera.up.copy(P.upB);camera.lookAt(_t2.copy(P.pos).addScaledVector(P.fwd,30).addScaledVector(P.upB,2));fov=80;}
     else{
       let want;
       // sous voile : caméra de suivi haute, plongeante, pour voir le sol et la cible (redevient rasante à l'approche)
       const cAgl=P.pos.y-groundH(P.pos.x,P.pos.z),ck=sstep(12,70,cAgl);
       if(state==='canopy'||(state==='deploying'&&P.deployT>.8)){const f=_t2.set(Math.sin(P.heading),0,-Math.cos(P.heading));want=_v.copy(f).multiplyScalar(-11-5*ck).add(_U.set(0,4.5+9*ck,0));}
-      else want=_v.copy(dir).multiplyScalar(-10.5).add(_U.set(0,2.4,0));
+      else{const th=Math.PI*bb,rh=_t3v.set(-dir.z,0,dir.x);if(rh.lengthSq()<1e-4)rh.set(1,0,0);rh.normalize();
+        want=_v.copy(dir).multiplyScalar(-10.5*Math.cos(th)).addScaledVector(rh,9*Math.sin(th)).add(_U.set(0,2.4+.6*Math.sin(th),0));}
       camOff.lerp(want,1-Math.exp(-dt*(state==='flying'?5:2.5)));
       camera.position.copy(P.pos).add(camOff);
       const gmin=groundH(camera.position.x,camera.position.z)+1.2;if(camera.position.y<gmin)camera.position.y=gmin;
-      const look=state==='flying'?_t2.copy(P.pos).addScaledVector(dir,18).add(_U.set(0,1.2,0)):_t2.copy(P.pos).add(_U.set(Math.sin(P.heading)*(14+10*ck),2.5-24*ck,-Math.cos(P.heading)*(14+10*ck)));
+      const look=state==='flying'?_t2.copy(P.pos).addScaledVector(dir,18*Math.cos(Math.PI*bb)).add(_U.set(0,1.2,0)):_t2.copy(P.pos).add(_U.set(Math.sin(P.heading)*(14+10*ck),2.5-24*ck,-Math.cos(P.heading)*(14+10*ck)));
       camLook.lerp(look,1-Math.exp(-dt*8));
-      const upT=state==='flying'?_U.copy(UP).lerp(P.upB,.28).normalize():UP;camera.up.lerp(upT,1-Math.exp(-dt*4));
+      const upT=state==='flying'?_U.copy(UP).lerp(P.upB,.28*(1-bb)).normalize():UP;camera.up.lerp(upT,1-Math.exp(-dt*4));
       camera.lookAt(camLook);
       fov=68+clamp((sp-35)*.38,0,24);
     }
