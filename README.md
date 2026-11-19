@@ -1,2 +1,2 @@
-# Chicken-Wings
+# ChickenWings
 Fun game for fun
