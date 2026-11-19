@@ -962,14 +962,14 @@ function refX(s){if(s>LANE_S0-40&&s<WALL_S-40)return laneX(s);let x=xc(s),wsum=0
 /* chaque appareil tourne en boucle étroite (ovale) sur son propre tronçon de la trajectoire des pilotes :
    même ligne, même altitude, et jamais deux appareils sur le même tronçon */
 const AIR_DY={heli:0,para:-4,balloon:-17};// décalage du point de référence (rotor / sellette / nacelle) pour que l'appareil soit centré sur la trajectoire
-function trackPath(t,out,o){const mid=(o.s0+o.s1)/2,half=(o.s1-o.s0)/2,per=(4*half+2*o.loop)/o.v,ph=(t+o.ph)*2*Math.PI/per;
-  const s=mid+half*Math.cos(ph),x=refX(s)+o.loop*Math.sin(ph)+o.sw*Math.sin((t+o.ph)*2*Math.PI/19);
-  let y=refY(s)+AIR_DY[o.k]+4*Math.sin((t+o.ph)*.37);y=Math.max(y,terrainTop(x,-s,o.k==='balloon'?14:10)+o.m);
+function trackPath(t,out,o){const mid=(o.s0+o.s1)/2,half=(o.s1-o.s0)/2,per=(4*half+2*Math.abs(o.loop))/o.v,ph=(t+o.ph)*2*Math.PI/per;
+  const s=mid+half*Math.cos(ph),x=refX(s)+(o.xo||0)+o.loop*Math.sin(ph)+o.sw*Math.sin((t+o.ph)*2*Math.PI/19);
+  let y=refY(s)+AIR_DY[o.k]+(o.dy||0)+4*Math.sin((t+o.ph)*.37);y=Math.max(y,terrainTop(x,-s,o.k==='balloon'?14:10)+o.m,Math.max(groundH(x,-s-35),groundH(x,-s+35))+o.m*.7);
   return out.set(x,y,-s);}
 function addAir(kind,g,path,o,climb,sink){o.k=kind;const A={kind,g,path,o,climb,sink,pos:new V3(),vel:new V3(),hd:0,ys:null,warnT:-99,id:AIR.length};AIR.push(A);return A;}
-const airH=(c1,c2,s0,s1,ph)=>addAir('heli',makeHeli(c1,c2),trackPath,{s0,s1,v:12,loop:14,sw:3,m:22,ph},22,9);
-const airP=(c1,c2,s0,s1,ph)=>addAir('para',makePara(c1,c2),trackPath,{s0,s1,v:9.5,loop:12,sw:2,m:22,ph},20,10);
-const airB=(cols,s0,s1,ph)=>addAir('balloon',makeBalloon(cols),trackPath,{s0,s1,v:3.5,loop:10,sw:2,m:6,ph},8,4);
+const airH=(c1,c2,s0,s1,ph)=>addAir('heli',makeHeli(c1,c2),trackPath,{s0,s1,v:12,loop:14,sw:3,m:22,ph},28,9);
+const airP=(c1,c2,s0,s1,ph)=>addAir('para',makePara(c1,c2),trackPath,{s0,s1,v:9.5,loop:12,sw:2,m:22,ph},26,10);
+const airB=(cols,s0,s1,ph)=>addAir('balloon',makeBalloon(cols),trackPath,{s0,s1,v:3.5,loop:10,sw:2,m:6,ph},12,4);
 // tronçons (s en m) — la gorge (360-600) et les arches (1330-1400, 2930-3000) restent libres
 airB([0xe8312a,0xffd23a,0x2b78e4,0xffffff],650,800,0);              // sortie de gorge
 airH(0xc8202a,0xf0c020,880,1270,0);                                   // trouée en forêt
@@ -986,13 +986,37 @@ airB([0x7a3ae0,0xffffff,0xffd23a],3730,3830,130);                     // avant l
 airP(0xff6ad5,0x3a2a8a,3900,4080,20);                                // approche finale
 airB([0x20a46b,0xfff2c0,0xff7a1a],4130,4290,200);                     // au-dessus de la cible
 const HELI=AIR[0];// compatibilité (débogage)
-function airT(){if(AIRT.freezeT)return AIRT.freezeT;if(RP){const [a,b,k]=frameAt(RP.t);if(a.hw)return lerp(a.hw,b.hw||a.hw,k);}return Date.now()/1000;}
+/* variantes de trafic : une est tirée au début de chaque vol. En course, elle est déduite de l'identifiant de la course,
+   et l'horloge des appareils part du départ : chaque joueur calcule les mêmes positions sans rien échanger. */
+const AIR_SEGS=AIR.map(A=>[A.o.s0,A.o.s1]),AIR_BASE=AIR.map(A=>({...A.o})),AIR_LAYOUTS=6;
+const AIR_LANE=1;// tronçon de la trouée en forêt : trop étroit pour une montgolfière
+function airRng(seed){let s=(seed*7919+104729)%2147483647;return()=>{s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+function applyAirLayout(k){
+  AIRT.layout=k;const r=airRng(k+1),n=AIR.length,order=AIR.map((A,i)=>i);
+  if(k>0){for(let tries=0;tries<60;tries++){for(let i=n-1;i>0;i--){const j=Math.floor(r()*(i+1));[order[i],order[j]]=[order[j],order[i]];}
+    if(AIR[order[AIR_LANE]].kind!=='balloon')break;}}
+  order.forEach((ai,j)=>{const A=AIR[ai],B=AIR_BASE[ai],seg=AIR_SEGS[j],o=A.o;
+    const jit=k>0?(r()-.5)*20:0,lane=j===AIR_LANE;
+    o.s0=seg[0]+jit;o.s1=seg[1]+jit;o.ph=k>0?r()*300:B.ph;
+    o.loop=Math.abs(B.loop)*(k>0&&r()<.5?-1:1);
+    o.xo=k>0?(lane?(r()-.5)*14:[-14,0,14][Math.floor(r()*3)]):0;
+    o.dy=k>0?(r()-.5)*12:0;A.ys=null;});
+}
+function pickAirLayout(){
+  let k;if(MP.race&&MP.race.id){let h=0;for(const ch of String(MP.race.id))h=(h*31+ch.charCodeAt(0))>>>0;k=h%AIR_LAYOUTS;}
+  else{k=Math.floor(Math.random()*AIR_LAYOUTS);if(k===AIRT.layout)k=(k+1)%AIR_LAYOUTS;}
+  applyAirLayout(k);AIRT.clk=0;
+}
+AIRT.clk=0;applyAirLayout(0);
+function airT(){if(AIRT.freezeT)return AIRT.freezeT;if(RP){const [a,b,k]=frameAt(RP.t);if(a.ac!=null)return lerp(a.ac,b.ac??a.ac,k);}return AIRT.clk;}
 const _hp=new V3(),_hn=new V3();
 function heliFrame(dt){
+  if(!RP&&!AIRT.freezeT)AIRT.clk+=dt;
   const t=airT();
   for(const A of AIR){const g=A.g;A.path(t,A.pos,A.o);
     // vitesse verticale bornée ; recalage direct en cas de saut de temps (replay)
-    const ty=A.pos.y;if(A.ys==null||Math.abs(ty-A.ys)>250||!(dt>0))A.ys=ty;else A.ys+=clamp(ty-A.ys,-A.sink*dt,A.climb*dt);A.pos.y=A.ys;
+    const ty=A.pos.y;if(A.ys==null||Math.abs(ty-A.ys)>250||!(dt>0))A.ys=ty;else A.ys+=clamp(ty-A.ys,-A.sink*dt,A.climb*dt);
+    A.ys=Math.max(A.ys,groundH(A.pos.x,A.pos.z)+(A.kind==='balloon'?4:10));A.pos.y=A.ys;// plancher de sécurité
     A.path(t+.5,_hn,A.o);A.path(t-.5,_hp,A.o);
     A.vel.copy(_hn).sub(_hp);const sp=Math.hypot(A.vel.x,A.vel.z);if(sp>.3)A.hd=Math.atan2(A.vel.x,-A.vel.z);const hd=A.hd;
     const acc=_hn.add(_hp).addScaledVector(A.pos,-2).multiplyScalar(4),right=_hp.set(Math.cos(hd),0,Math.sin(hd));
@@ -1151,7 +1175,7 @@ const fmt1=v=>Math.max(0,v).toFixed(1).replace('.',',');
 function recEvent(type,label,clear,must,t){REC.events.push({type,label,clear,must,t:t===undefined?REC.t:t});}
 function resetStats(){S={t:0,maxSpd:0,proxT:0,near:0,holes:WALLS.map(()=>false),cols:COLS.map(()=>false),lane:false,liftMin:Infinity,liftGain:0,deployAgl:null,deploySpd:0,startS:0,flags:{},lastToast:0,score:0,inLift:false};}
 resetStats();
-window.__cw={P,get S(){return S;},get state(){return state;},get DBG(){return DBG;},keys,laneX,xc,groundH,WALLS,COLS,LAKES,TARGET,NEEDLES,ARCHES,physicsStep:h=>physicsStep(h),REC,LIFTS,GORGE,windAt,startReplay,get RPLIST(){return RPLIST;},get RP(){return RP;},W:s=>tab(WID,s),F:s=>tab(FLOOR,s),get trees(){return treeList.length;},HELI,AIR,AIRT,DROPS,addDrop,trackPath};
+window.__cw={P,get S(){return S;},get state(){return state;},get DBG(){return DBG;},keys,laneX,xc,groundH,WALLS,COLS,LAKES,TARGET,NEEDLES,ARCHES,physicsStep:h=>physicsStep(h),REC,LIFTS,GORGE,windAt,startReplay,get RPLIST(){return RPLIST;},get RP(){return RP;},W:s=>tab(WID,s),F:s=>tab(FLOOR,s),get trees(){return treeList.length;},HELI,AIR,AIRT,DROPS,addDrop,trackPath,applyAirLayout};
 
 const _t1=new V3(),_t2=new V3(),_w=new V3(),_v=new V3(),_F=new V3(),_Rh=new V3(),_U=new V3(),_R=new V3(),_L=new V3(),_M=new THREE.Matrix4(),_q=new THREE.Quaternion(),UP=new V3(0,1,0);
 function hangQuat(h,out){const f=_t1.set(Math.sin(h),0,-Math.cos(h)),r=_t2.set(Math.cos(h),0,Math.sin(h));_M.makeBasis(r,_v.copy(f).negate(),_U.set(0,-1,0));return out.setFromRotationMatrix(_M);}
@@ -1294,7 +1318,7 @@ function startGame(){if(state!=='title')return;document.body.classList.add('play
 function resetRun(){
   if(SPEC.on)specExit(false);
   state='ready';paused=false;endShown=false;practice=false;$('pauseScreen').classList.add('hidden');$('endScreen').classList.add('hidden');
-  P.heading=0;P.pos.set(EXIT.x,groundH(EXIT.x,EXIT.z)+1.15,EXIT.z);mpPlaceStart(true);P.vel.set(0,0,0);P.alpha=11;P.trim=11;P.bank=0;P.rightH.set(1,0,0);P.idle=0;P.blend=0;P.rag=null;P.crashCause=null;P.flare=0;P.flareHold=0;P.turn=0;P.landKind=null;P.tangle=0;dropLeft=DROP_MAX;myDrops=[];MP.tg=null;
+  P.heading=0;P.pos.set(EXIT.x,groundH(EXIT.x,EXIT.z)+1.15,EXIT.z);mpPlaceStart(true);P.vel.set(0,0,0);P.alpha=11;P.trim=11;P.bank=0;P.rightH.set(1,0,0);P.idle=0;P.blend=0;P.rag=null;P.crashCause=null;P.flare=0;P.flareHold=0;P.turn=0;P.landKind=null;P.tangle=0;dropLeft=DROP_MAX;myDrops=[];MP.tg=null;pickAirLayout();
   for(const D of DROPS)if(D.own||D.att)D.dead=true;
   hangQuat(0,P.quat);canopyG.visible=false;canopyG.scale.set(1,1,1);canopyG.rotation.set(0,0,0);
   const h=jumper.userData.helmet;if(h.parent!==jumper){h.parent.remove(h);jumper.add(h);h.position.set(0,.02,-.53);h.rotation.set(0,0,0);h.userData.vel=null;}
@@ -1303,6 +1327,7 @@ function resetRun(){
   camPos.set(P.pos.x+2.2,P.pos.y+1.3,P.pos.z+5.5);
   $('scoreBox').textContent='Tentative n° '+(attempts+1);
   toast('Prenez une grande inspiration… ESPACE pour sauter','fun',3500);
+  toast('✈ Trafic aérien : variante '+(AIRT.layout+1)+' / '+AIR_LAYOUTS,'fun',2600);
 }
 function doJump(){
   if(state!=='ready')return;if(MP.cdEnd&&performance.now()<MP.cdEnd){toast('Attendez le départ !','warn',1200);return;}state='flying';attempts++;try{localStorage.setItem('cw_attempts',attempts);}catch(e){}
@@ -1774,7 +1799,7 @@ function recFrame(dt){
   if(RP||endShown||!REC_STATES.includes(state))return;
   REC.t+=dt;REC.acc+=dt;if(REC.acc<1/30&&REC.frames.length)return;REC.acc=0;
   const q=jumper.quaternion,aL=jumper.userData.arms[0],h=jumper.userData.helmet,det=h.parent!==jumper,cv=canopyG.visible;
-  REC.frames.push({t:REC.t,hw:Date.now()/1000,a:state==='flying'||state==='deploying'||state==='canopy'?1:0,p:[P.pos.x,P.pos.y,P.pos.z],q:[q.x,q.y,q.z,q.w],bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR],cv,
+  REC.frames.push({t:REC.t,ac:AIRT.clk,a:state==='flying'||state==='deploying'||state==='canopy'?1:0,p:[P.pos.x,P.pos.y,P.pos.z],q:[q.x,q.y,q.z,q.w],bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR],cv,
     cp:cv?canopyG.position.toArray():null,cr:cv?[canopyG.rotation.x,canopyG.rotation.y,canopyG.rotation.z]:null,cs:cv?canopyG.scale.toArray():null,
     hp:det?[h.position.x,h.position.y,h.position.z,h.rotation.x,h.rotation.y,h.rotation.z]:null});
 }
