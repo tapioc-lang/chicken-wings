@@ -512,21 +512,30 @@ function buildTerrain(){
   const m=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({vertexColors:true,map:detailTex}));
   m.receiveShadow=true;scene.add(m);
 }
-const C_GRASS_LO=[.36,.54,.21],C_GRASS_HI=[.55,.55,.35],C_FOREST=[.24,.32,.15],C_ROCK1=[.43,.41,.38],C_ROCK2=[.58,.55,.5],C_SNOW=[.95,.96,.98],C_MEADOW=[.42,.62,.24];
+const C_GRASS_LO=[.32,.56,.18],C_GRASS_HI=[.56,.6,.3],C_FOREST=[.19,.29,.12],C_ROCK1=[.45,.42,.39],C_ROCK2=[.63,.59,.53],C_SNOW=[.95,.97,1],C_MEADOW=[.4,.66,.2];
+const C_LUSH=[.25,.6,.17],C_DRY=[.68,.63,.32],C_HEATH=[.47,.33,.38],C_OCHRE=[.64,.47,.3],C_SCREE=[.56,.53,.48],C_MOSS=[.34,.46,.2],C_BLOOM=[.78,.74,.3];
 function mix3(a,b,t){return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
 function terrainColor(x,s,h,ny,out){
-  const nz=fbm(x*.01+5,s*.01-3,3),n2=vnoise(x*.06,s*.06);
+  const nz=fbm(x*.01+5,s*.01-3,3),n2=vnoise(x*.06,s*.06),n3=fbm(x*.0025-7,s*.0025+11,3),n4=vnoise(x*.13+3,s*.13-8);
+  // herbe : vert vif en bas, pâturages plus jaunes en altitude, prairies grasses, herbe sèche et landes de bruyère
   let g=mix3(C_GRASS_LO,C_GRASS_HI,sstep(850,1600,h+nz*200));
+  g=mix3(g,C_LUSH,.5*sstep(.05,.4,n3)*(1-sstep(900,1400,h)));
+  g=mix3(g,C_DRY,.38*sstep(.1,.45,-n3)*sstep(700,1300,h));
+  g=mix3(g,C_HEATH,.45*sstep(.15,.45,fbm(x*.006-13,s*.006+4,2))*sstep(1100,1300,h)*(1-sstep(1650,1800,h)));
   const dv=Math.abs(x-xc(s));
   if(s>LANE_S0-40&&s<WALL_S&&dv<480)g=mix3(g,C_FOREST,.7);
-  if(s>TARGET.s-380&&s<TARGET.s+320&&dv<500)g=mix3(g,C_MEADOW,.6*(1-sstep(350,500,dv)));
+  if(s>TARGET.s-380&&s<TARGET.s+320&&dv<500){const k=1-sstep(350,500,dv);g=mix3(g,C_MEADOW,.6*k);g=mix3(g,C_BLOOM,.35*k*sstep(.35,.7,n4));}
   g=mix3(g,C_FOREST,.45*sstep(-.1,.25,fbm(x*.004+20,s*.004,3))*(1-sstep(1300,1600,h)));
-  const rockC=mix3(C_ROCK1,C_ROCK2,.5+n2*.5);
-  let c=mix3(g,rockC,sstep(.86,.64,ny+nz*.1));
+  // roche : gris chaud, veines ocre, mousse en basse altitude ; éboulis sur les pentes moyennes
+  let rockC=mix3(C_ROCK1,C_ROCK2,.5+n2*.5);
+  rockC=mix3(rockC,C_OCHRE,.45*sstep(.12,.5,fbm(x*.008+40,s*.008,2)));
+  rockC=mix3(rockC,C_MOSS,.3*(1-sstep(900,1400,h))*sstep(0,.5,n4));
+  let c=mix3(g,C_SCREE,.45*sstep(.93,.8,ny+nz*.05));
+  c=mix3(c,rockC,sstep(.86,.64,ny+nz*.1));
   c=mix3(c,C_SNOW,sstep(1670,1800,h+nz*160)*sstep(.45,.7,ny));
   if(inRiver(s))c=mix3(c,[.56,.54,.49],.8*(1-sstep(7,19,Math.abs(x-riverX(s)))));
   for(const L of LAKES){const lr=Math.hypot(x-L.x,s-L.s);if(lr<L.r+35)c=mix3(c,[.55,.53,.47],.6*(1-sstep(L.r,L.r+35,lr)));}
-  const b=.9+n2*.08;
+  const b=.9+n2*.07+n4*.05;
   out.setRGB(c[0]*b,c[1]*b,c[2]*b).convertSRGBToLinear();
 }
 
@@ -658,26 +667,87 @@ function buildTrees(){
     if(rnd()>.12)continue;
     addRock(x,s,lerp(2.5,gorgeK(s)>.5?7:11,Math.pow(rnd(),1.6)));
   }
-  // géométrie, découpée en blocs de 400 m pour que les forêts hors champ ne soient pas dessinées
+  // ---- décor végétal : trois essences (épicéa, mélèze, feuillu), rochers variés, herbe et fleurs ----
+  // générateur dédié au décor : ne décale pas le tirage du reste du monde
+  let vs=9173;const vr=()=>{vs=(vs*16807)%2147483647;return (vs-1)/2147483646;};
+  // fusion de géométries avec couleur par sommet (ombrage interne : plus sombre au cœur et en bas)
+  const mergeC=(list,colFn)=>{const m=mergeGeoms(list),p=m.attributes.position,c=new Float32Array(p.count*3);
+    for(let i=0;i<p.count;i++){const v=colFn(p.getX(i),p.getY(i),p.getZ(i));c[i*3]=v;c[i*3+1]=v;c[i*3+2]=v;}m.setAttribute('color',new THREE.BufferAttribute(c,3));return m;};
+  const tiers=(n,r0,r1,y0,y1,seg,droop)=>{const L=[];for(let i=0;i<n;i++){const k=i/(n-1),r=lerp(r0,r1,k),h=(y1-y0)/n*2.1,cy=lerp(y0,y1,k)+h*.35;
+      const g=new THREE.ConeGeometry(r,h,seg,1,false);g.translate(0,cy,0);
+      if(droop){const p=g.attributes.position;for(let j=0;j<p.count;j++){const x=p.getX(j),z=p.getZ(j),rr=Math.hypot(x,z);if(rr>r*.6)p.setY(j,p.getY(j)-droop*h);}}
+      g.rotateY(i*.7);L.push(g);}return L;};
+  const shade=(x,y,z)=>{const rr=Math.hypot(x,z);return lerp(.62,1.12,clamp(y,0,1))*lerp(.8,1.08,clamp(rr*1.4,0,1));};
+  const spruceG=mergeC(tiers(5,1,.22,.02,.98,8,.18),shade);
+  const larchG=mergeC(tiers(6,.72,.16,.06,1,7,.08),shade);
+  const blob=(x,y,z,r)=>{const g=new THREE.IcosahedronGeometry(r,1);const p=g.attributes.position;
+    for(let j=0;j<p.count;j++){const k=1+.12*vnoise(p.getX(j)*3+x*7,p.getY(j)*3+z*5);p.setXYZ(j,p.getX(j)*k,p.getY(j)*k,p.getZ(j)*k);}g.computeVertexNormals();g.translate(x,y,z);return g;};
+  const broadG=mergeC([blob(0,.66,0,.5),blob(.28,.52,.12,.36),blob(-.26,.55,-.1,.38),blob(.05,.86,-.05,.34),blob(-.08,.45,.27,.3)],(x,y,z)=>lerp(.6,1.12,clamp((y-.25)/.75,0,1)));
   const trunk=new THREE.CylinderGeometry(.55,1,1,6,1,true);trunk.translate(0,.5,0);
-  const cones=[[1,.55,.275],[.74,.5,.52],[.48,.42,.79]].map(([r,h,c])=>{const g=new THREE.ConeGeometry(r,h,7);g.translate(0,c,0);return g;});
-  const fol=mergeGeoms(cones);
-  const trunkMat=new THREE.MeshLambertMaterial({color:lin(0x5a3d26)}),folMat=new THREE.MeshLambertMaterial({color:0xffffff});
-  const rockGeo=new THREE.DodecahedronGeometry(1,0),rockMat=new THREE.MeshLambertMaterial({color:lin(0x8a847a),flatShading:true});
-  const chunks=new Map();
-  for(const t of treeList){const k=Math.floor(t.x/400)+','+Math.floor(t.z/400);let c=chunks.get(k);if(!c)chunks.set(k,c={trees:[],rocks:[]});(t.rock?c.rocks:c.trees).push(t);}
+  const trunkMat=new THREE.MeshLambertMaterial({color:lin(0x5a3d26)}),folMat=new THREE.MeshLambertMaterial({vertexColors:true}),folMatF=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
+  // rochers : trois formes bosselées, mousse sur le dessus, ombre à la base, lichens
+  const rockGeos=[0,1,2].map(v=>{const g=new THREE.IcosahedronGeometry(1,1),p=g.attributes.position;
+    for(let j=0;j<p.count;j++){const x=p.getX(j),y=p.getY(j),z=p.getZ(j),k=1+.28*vnoise(x*1.7+v*5,z*1.7+y*1.3)+.1*vnoise(x*4,y*4+v);p.setXYZ(j,x*k,y*k*(y<0?.7:1),z*k);}
+    const ng=g.toNonIndexed();ng.computeVertexNormals();const q=ng.attributes.position,nn=ng.attributes.normal,c=new Float32Array(q.count*3);
+    for(let j=0;j<q.count;j++){const y=q.getY(j),up=nn.getY(j),li=vnoise(q.getX(j)*3+v,q.getZ(j)*3);let r=1,gg=1,b=1;const base=lerp(.62,1.05,clamp((y+.6)/1.3,0,1));
+      if(up>.55&&li>.05){r=.62;gg=.85;b=.5;}else if(li<-.45){r=1.12;gg=.86;b=.55;}
+      c[j*3]=r*base;c[j*3+1]=gg*base;c[j*3+2]=b*base;}
+    ng.setAttribute('color',new THREE.BufferAttribute(c,3));return ng;});
+  const rockMat=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
+  const ROCK_COLS=[[.64,.62,.59],[.68,.6,.5],[.62,.48,.4],[.52,.55,.6],[.46,.45,.43],[.72,.68,.6]];
+  // herbe en touffes et fleurs des champs, là où l'on vole bas (fond de vallée, prairie d'arrivée)
+  const tuft=(()=>{const L=[];for(let i=0;i<5;i++){const a=i/5*Math.PI*2+.3,g=new THREE.BufferGeometry();
+      const lx=Math.cos(a)*.35,lz=Math.sin(a)*.35,px=-Math.sin(a)*.07,pz=Math.cos(a)*.07;
+      g.setAttribute('position',new THREE.Float32BufferAttribute([px,0,pz,-px,0,-pz,lx,1,lz],3));g.setAttribute('normal',new THREE.Float32BufferAttribute([0,1,0,0,1,0,0,1,0],3));L.push(g);}
+    const m=mergeGeoms(L),p=m.attributes.position,c=new Float32Array(p.count*3);for(let i=0;i<p.count;i++){const v=lerp(.55,1.15,p.getY(i));c[i*3]=v;c[i*3+1]=v;c[i*3+2]=v;}
+    m.setAttribute('color',new THREE.BufferAttribute(c,3));return m;})();
+  const bloom=(()=>{const L=[];for(let i=0;i<7;i++){const g=new THREE.OctahedronGeometry(.16,0),a=i*2.4,r=.15+.5*((i*37)%10)/10;g.translate(Math.cos(a)*r,.45+.25*((i*53)%10)/10,Math.sin(a)*r);L.push(g);}return mergeGeoms(L);})();
+  const grassMat=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}),bloomMat=new THREE.MeshLambertMaterial({color:0xffffff});
+  const GRASS=[],FLOWERS=[];
+  for(let k=0;k<70000&&GRASS.length<11000;k++){
+    const s=560+vr()*3950,W=tab(WID,s),x=xc(s)+(vr()*2-1)*(W+40),z=-s,dv=Math.abs(x-xc(s));
+    const meadow=s>TARGET.s-380&&s<TARGET.s+320&&dv<480;
+    if(!meadow&&vr()>.55)continue;
+    if(s>LANE_S0-40&&s<WALL_S+60&&dv<450)continue;
+    if(inRiver(s)&&Math.abs(x-riverX(s))<8)continue;if(lakeAt(x,s))continue;
+    if(Math.hypot(x-TARGET.x,s-TARGET.s)<24)continue;
+    const y=groundH(x,z);if(y>1500)continue;groundNormal(x,z,_n);if(_n.y<.82)continue;
+    const it={x,y,z,r:vr()*6.28,sc:lerp(.9,1.7,vr())};
+    if(vr()<(meadow?.09:.04))FLOWERS.push(it);else GRASS.push(it);}// fleurs discrètes : quelques touches de couleur
+  // découpage en blocs de 400 m (les blocs hors champ ne sont pas dessinés)
+  const chunks=new Map(),chunk=(x,z)=>{const k=Math.floor(x/400)+','+Math.floor(z/400);let c=chunks.get(k);if(!c)chunks.set(k,c={spruce:[],larch:[],broad:[],rocks:[],grass:[],flowers:[]});return c;};
+  for(const t of treeList){const c=chunk(t.x,t.z);if(t.rock){c.rocks.push(t);continue;}
+    const s=-t.z,dv=Math.abs(t.x-xc(s)),W=tab(WID,s),valley=dv<W+70,r=vr();
+    t.k=t.y<1150&&valley&&r<.42&&!(s>LANE_S0-40&&s<WALL_S)?'broad':(t.y>1050&&t.y<1700&&r>.7)?'larch':'spruce';c[t.k].push(t);}
+  GRASS.forEach(t=>chunk(t.x,t.z).grass.push(t));FLOWERS.forEach(t=>chunk(t.x,t.z).flowers.push(t));
   const M=new THREE.Matrix4(),Q=new THREE.Quaternion(),Sx=new V3(),Px=new V3(),col=new THREE.Color(),Y=new V3(0,1,0);
-  const mk=(geo,mat,list,set)=>{if(!list.length)return;let cx=0,cy=0,cz=0;list.forEach(t=>{cx+=t.x;cy+=t.y;cz+=t.z;});cx/=list.length;cy/=list.length;cz/=list.length;
-    let r=0;list.forEach(t=>{r=Math.max(r,Math.hypot(t.x-cx,t.y-cy,t.z-cz)+t.h+15);});
+  const mk=(geo,mat,list,set,shadow=true)=>{if(!list.length)return;let cx=0,cy=0,cz=0;list.forEach(t=>{cx+=t.x;cy+=t.y;cz+=t.z;});cx/=list.length;cy/=list.length;cz/=list.length;
+    let r=0;list.forEach(t=>{r=Math.max(r,Math.hypot(t.x-cx,t.y-cy,t.z-cz)+(t.h||2)+15);});
     const g=geo.clone();g.boundingSphere=new THREE.Sphere(new V3(0,0,0),r);
     const m=new THREE.InstancedMesh(g,mat,list.length);m.position.set(cx,cy,cz);
-    list.forEach((t,i)=>set(t,i,m,cx,cy,cz));m.instanceMatrix.needsUpdate=true;m.castShadow=true;m.receiveShadow=true;scene.add(m);};
+    list.forEach((t,i)=>set(t,i,m,cx,cy,cz));m.instanceMatrix.needsUpdate=true;if(m.instanceColor)m.instanceColor.needsUpdate=true;m.castShadow=shadow;m.receiveShadow=true;scene.add(m);};
+  const hsl=(h,s,l)=>col.setHSL(h,s,l).convertSRGBToLinear();
+  let rockPick=0;
   for(const c of chunks.values()){
-    const rots=c.trees.map(()=>rnd()*6.28);
-    mk(trunk,trunkMat,c.trees,(t,i,m,cx,cy,cz)=>{Q.setFromAxisAngle(Y,rots[i]);Px.set(t.x-cx,t.y-.6-cy,t.z-cz);Sx.set(t.rt,t.h*.32,t.rt);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);});
-    mk(fol,folMat,c.trees,(t,i,m,cx,cy,cz)=>{Q.setFromAxisAngle(Y,rots[i]);Px.set(t.x-cx,t.y+t.h*.14-cy,t.z-cz);Sx.set(t.R,t.h*.86,t.R);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);
-      col.setHSL(.27+rnd()*.08,.35+rnd()*.25,.16+rnd()*.1).convertSRGBToLinear();m.setColorAt(i,col);});
-    mk(rockGeo,rockMat,c.rocks,(t,i,m,cx,cy,cz)=>{Q.setFromEuler(new THREE.Euler(rnd()*3,rnd()*3,rnd()*3));Px.set(t.x-cx,t.y+t.r*.25-cy,t.z-cz);Sx.set(t.r*1.15,t.r*.8,t.r);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);});
+    const trees=[...c.spruce,...c.larch,...c.broad],rots=new Map(trees.map(t=>[t,vr()*6.28]));
+    mk(trunk,trunkMat,trees,(t,i,m,cx,cy,cz)=>{Q.setFromAxisAngle(Y,rots.get(t));Px.set(t.x-cx,t.y-.6-cy,t.z-cz);Sx.set(t.rt*(t.k==='broad'?1.5:1),t.h*(t.k==='broad'?.5:.32),t.rt*(t.k==='broad'?1.5:1));M.compose(Px,Q,Sx);m.setMatrixAt(i,M);});
+    // épicéas : verts profonds, parfois bleutés
+    mk(spruceG,folMat,c.spruce,(t,i,m,cx,cy,cz)=>{Q.setFromAxisAngle(Y,rots.get(t));Px.set(t.x-cx,t.y+t.h*.12-cy,t.z-cz);Sx.set(t.R,t.h*.88,t.R);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);
+      const r=vr();hsl(r<.2?.42+vr()*.06:.3+vr()*.08,.38+vr()*.25,.17+vr()*.1);m.setColorAt(i,col);});
+    // mélèzes : vert tendre (pas de jaune)
+    mk(larchG,folMat,c.larch,(t,i,m,cx,cy,cz)=>{Q.setFromAxisAngle(Y,rots.get(t));Px.set(t.x-cx,t.y+t.h*.1-cy,t.z-cz);Sx.set(t.R*.95,t.h*.9,t.R*.95);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);
+      hsl(.28+vr()*.06,.4+vr()*.2,.26+vr()*.1);m.setColorAt(i,col);});
+    // feuillus : verts variés (ni jaune ni rouge)
+    mk(broadG,folMatF,c.broad,(t,i,m,cx,cy,cz)=>{Q.setFromAxisAngle(Y,rots.get(t));Px.set(t.x-cx,t.y+t.h*.12-cy,t.z-cz);const w=t.R*2.3;Sx.set(w,t.h*.8,w);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);
+      hsl(.26+vr()*.08,.45+vr()*.25,.22+vr()*.12);m.setColorAt(i,col);});
+    // rochers : six teintes, trois formes
+    {const L=c.rocks,v=(rockPick++)%3;
+      mk(rockGeos[v],rockMat,L,(t,i,m,cx,cy,cz)=>{Q.setFromEuler(new THREE.Euler(vr()*.6,vr()*6.28,vr()*.6));Px.set(t.x-cx,t.y+t.r*.2-cy,t.z-cz);Sx.set(t.r*1.1,t.r*.85,t.r);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);
+        const p=ROCK_COLS[Math.floor(vr()*ROCK_COLS.length)],b=.9+vr()*.2;col.setRGB(p[0]*b,p[1]*b,p[2]*b).convertSRGBToLinear();m.setColorAt(i,col);});}
+    mk(tuft,grassMat,c.grass,(t,i,m,cx,cy,cz)=>{Q.setFromAxisAngle(Y,t.r);Px.set(t.x-cx,t.y-.1-cy,t.z-cz);Sx.set(t.sc,t.sc,t.sc);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);
+      const r=vr();if(r<.25)hsl(.16+vr()*.04,.55,.42);else hsl(.24+vr()*.07,.55+vr()*.2,.3+vr()*.12);m.setColorAt(i,col);},false);
+    mk(bloom,bloomMat,c.flowers,(t,i,m,cx,cy,cz)=>{Q.setFromAxisAngle(Y,t.r);Px.set(t.x-cx,t.y-cy,t.z-cz);Sx.set(t.sc,t.sc,t.sc);M.compose(Px,Q,Sx);m.setMatrixAt(i,M);
+      const F=[[.14,.95,.55],[.0,0,.95],[.78,.6,.6],[.0,.75,.5],[.6,.7,.6],[.08,.9,.55]],f=F[Math.floor(vr()*F.length)];hsl(f[0],f[1],f[2]);m.setColorAt(i,col);},false);
   }
 }
 
@@ -960,15 +1030,44 @@ function makeHeli(c1,c2){const g=new THREE.Group();
   for(let i=0;i<4;i++){const b=add(new THREE.BoxGeometry(.3,.045,5.5),dk,0,0,0,rot);b.geometry.translate(0,0,2.85);b.rotation.y=i*Math.PI/2;}
   const disc=new THREE.Mesh(new THREE.CircleGeometry(5.6,32),new THREE.MeshBasicMaterial({color:0x22262a,transparent:true,opacity:.12,depthWrite:false,side:THREE.DoubleSide}));disc.rotation.x=-Math.PI/2;rot.add(disc);
   g.userData={rot,tr};scene.add(g);return g;}
-// parapente : voile en arc de 9 caissons (nez vers -Z), suspentes, pilote assis dans sa sellette
-function makePara(c1,c2){const g=new THREE.Group();const m1=_am(c1),m2=_am(c2),dk=_am(0x2a2e33);
-  const R=6.2,pts=[];
-  for(let i=0;i<9;i++){const a=(i-4)/4*.95,x=Math.sin(a)*R,y=7.6-(1-Math.cos(a))*R;
-    const c=airAdd(g,new THREE.BoxGeometry(1.6,.32,2.7-Math.abs(i-4)*.18),i%2?m2:m1,x,y,0);c.rotation.z=-a;
-    if(i%2===0){pts.push(new V3(x,y-.15,-.8),new V3(0,.6,0),new V3(x,y-.15,.9),new V3(0,.6,0));}}
-  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0x333333})));
-  airAdd(g,new THREE.BoxGeometry(.55,.5,.8),dk,0,0,.1);airAdd(g,new THREE.BoxGeometry(.45,.6,.35),m1,0,.45,-.05);
-  airAdd(g,new THREE.SphereGeometry(.2,10,8),_am(0xf4f4f4),0,.9,-.05);airAdd(g,new THREE.BoxGeometry(.3,.15,.75),dk,0,-.05,-.55);
+/* parapente (nez vers -Z) : aile elliptique en arc, profil épais (extrados / intrados), caissons visibles,
+   bouches d'entrée d'air au bord d'attaque, stabilos, suspentes A/B/C réunies sur deux élévateurs, pilote assis en sellette */
+function makePara(c1,c2){const g=new THREE.Group();
+  const R=6.4,YC=7.7-R,AMAX=1.0,NU=40,NV=9,NC=24;// NC caissons
+  const cA=new THREE.Color(c1).convertSRGBToLinear(),cB=new THREE.Color(c2).convertSRGBToLinear(),cW=new THREE.Color(0xf4f4f4).convertSRGBToLinear(),cD=new THREE.Color(0x1d2126).convertSRGBToLinear();
+  // motif : bloc central couleur 1, bandes couleur 2, bouts d'aile blancs
+  const cellCol=(u)=>{const cell=Math.floor((u+1)/2*NC),m=Math.abs(cell-(NC-1)/2);return m>10.5?cW:(m>6.5&&m<8.5)||m<1.5?cB:cA;};
+  const chord=u=>2.9*Math.sqrt(Math.max(.06,1-.82*u*u));
+  // point de l'aile : u ∈[-1,1] envergure, v ∈[0,1] bord d'attaque → bord de fuite, side = +1 extrados / -1 intrados
+  const P=(u,v,side)=>{const a=u*AMAX,c=chord(u),nx=Math.sin(a),ny=Math.cos(a);
+    const th=c*.075*Math.sin(Math.PI*Math.pow(v,.6))*(side>0?1:.35)*(1-.5*Math.abs(u));
+    const sweep=.35*u*u;// léger recul des bouts d'aile
+    const z=-c*.38+v*c+sweep,yTw=.22*(1-v)*(1-.4*Math.abs(u));// incidence : bord d'attaque plus haut
+    return [nx*R+nx*th*side,YC+ny*R+ny*th*side+yTw,z];};
+  const pos=[],col=[];
+  const quad=(a,b,c,d,cc)=>{for(const p of [a,b,c,a,c,d]){pos.push(...p);col.push(cc.r,cc.g,cc.b);}};
+  for(let i=0;i<NU;i++){const u0=-1+2*i/NU,u1=-1+2*(i+1)/NU,cc=cellCol((u0+u1)/2),ccB=cc.clone().multiplyScalar(.72);
+    for(let j=0;j<NV;j++){const v0=j/NV,v1=(j+1)/NV;
+      quad(P(u0,v0,1),P(u1,v0,1),P(u1,v1,1),P(u0,v1,1),cc);// extrados
+      quad(P(u0,v0,-1),P(u0,v1,-1),P(u1,v1,-1),P(u1,v0,-1),ccB);}// intrados
+    // bord d'attaque : bouches sombres entre extrados et intrados
+    quad(P(u0,0,1),P(u0,0,-1),P(u1,0,-1),P(u1,0,1),Math.abs((u0+u1)/2)<.9?cD:cc);}
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));geo.computeVertexNormals();
+  const wing=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}));wing.castShadow=true;g.add(wing);
+  // nervures (caissons) dessinées sur l'extrados
+  const rl=[];for(let k=1;k<NC;k++){const u=-1+2*k/NC;for(let j=0;j<6;j++){const a=P(u,j/6,1),b=P(u,(j+1)/6,1);rl.push(new V3(...a).multiplyScalar(1.002),new V3(...b).multiplyScalar(1.002));}}
+  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(rl),new THREE.LineBasicMaterial({color:0x000000,transparent:true,opacity:.25})));
+  // suspentes : rangées A, B, C vers deux élévateurs
+  const ln=[],rsL=new V3(-.24,1.15,-.05),rsR=new V3(.24,1.15,-.05);
+  for(const u of [-.92,-.7,-.48,-.26,-.08,.08,.26,.48,.7,.92])for(const v of [.12,.4,.7]){const p=P(u,v,-1);ln.push(new V3(...p),u<0?rsL:rsR);}
+  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(ln),new THREE.LineBasicMaterial({color:0x3a3a3a,transparent:true,opacity:.7})));
+  // pilote en sellette : coque, buste, casque, jambes tendues vers l'avant, bras aux commandes
+  const dk=_am(0x2a2e33),suit=_am(c2),skin=_am(0xe2ad8a);
+  const pod=airAdd(g,new THREE.SphereGeometry(.42,12,8),dk,0,.05,.05);pod.scale.set(1,.75,1.5);
+  airAdd(g,new THREE.BoxGeometry(.44,.62,.3),suit,0,.5,.1);
+  airAdd(g,new THREE.SphereGeometry(.17,12,10),_am(c1),0,.95,.06);airAdd(g,new THREE.SphereGeometry(.13,8,6),skin,0,.9,-.03);
+  const legs=airAdd(g,new THREE.BoxGeometry(.36,.2,.8),dk,0,-.05,-.55);legs.rotation.x=.12;
+  for(const sd of[-1,1]){const arm=airTube(g,new V3(sd*.22,.72,.05),new V3(sd*.3,1.2,.05),.05,suit);}
   scene.add(g);return g;}
 /* montgolfière : enveloppe en goutte inversée (profil réel, Ø ≈ 18 m), 16 fuseaux aux couleurs nettes, sangles de charge,
    jupe à la bouche, câbles vers le cadre du brûleur, nacelle en osier avec passagers — y = 0 au fond de la nacelle */
