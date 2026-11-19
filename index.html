@@ -92,6 +92,9 @@ body.gyro #gyroInd{display:block}
 #btnAct{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));width:104px;height:104px;border-radius:50%;padding:0;font-size:15px;font-weight:900;letter-spacing:.04em;box-shadow:0 4px 16px rgba(0,0,0,.5),0 0 0 4px rgba(255,122,26,.3);touch-action:none}
 #btnAct.flare{background:#3aa0ff;color:#fff}
 #btnAct.off{opacity:.25}
+#btnDrop{position:absolute;right:calc(max(16px,env(safe-area-inset-right)) + 116px);bottom:calc(max(16px,env(safe-area-inset-bottom)) + 18px);width:66px;height:66px;border-radius:50%;padding:0;font-size:26px;background:rgba(8,14,22,.75);color:#fff;border:2px solid rgba(255,255,255,.35);touch-action:none}
+#btnDrop i{position:absolute;right:-2px;top:-2px;font-style:normal;font-size:12px;font-weight:900;background:#ff7a1a;color:#000;border-radius:9px;min-width:18px;height:18px;line-height:18px}
+#btnDrop.off{opacity:.3}
 #btnAct:active{transform:scale(.94)}
 #tbar{position:absolute;right:max(8px,env(safe-area-inset-right));top:calc(min(46vh,300px) + 16px);display:flex;gap:6px;pointer-events:auto}
 #tbar button,#cpRow button{width:42px;height:42px;padding:0;border-radius:10px;font-size:19px;background:rgba(8,14,22,.6);color:#fff;border:1px solid rgba(255,255,255,.2);touch-action:manipulation}
@@ -197,10 +200,11 @@ body.touch #mpReady{bottom:140px;font-size:13px}
     <div id="padZone"><div id="padBase" class="idle"><span class="lb" style="top:-18px;left:50%;transform:translateX(-50%)">PIQUER</span><span class="lb" style="bottom:-18px;left:50%;transform:translateX(-50%)">CABRER</span><div id="padKnob"></div></div></div>
     <div id="gyroInd"><div id="gyroDot"></div><div class="lb">INCLINEZ</div></div>
     <button id="btnAct">SAUTER</button>
+    <button id="btnDrop" style="display:none">🪂<i>3</i></button>
     <div id="tbar"><button id="tbPause" title="Pause">⏸</button><button id="tbCam" title="Caméra">🎥</button><button id="tbReset" title="Recommencer">↺</button><button id="tbMode" title="Pastille / gyroscope">📱</button><button id="tbCal" title="Recalibrer">🎯</button></div>
     <div id="cpRow"><span>Départ en vol :</span><button data-cp="2">Forêt</button><button data-cp="3">Arche 1</button><button data-cp="4">Col 1</button><button data-cp="5">Arche 2</button></div>
   </div>
-  <div id="help" class="panel"><kbd>↑</kbd><kbd>↓</kbd> régler l'incidence · <kbd>←</kbd><kbd>→</kbd> virer · <kbd>Espace</kbd> sauter / parachute · <kbd>C</kbd> caméra · <kbd>R</kbd> recommencer · <kbd>P</kbd> pause</div>
+  <div id="help" class="panel"><kbd>↑</kbd><kbd>↓</kbd> régler l'incidence · <kbd>←</kbd><kbd>→</kbd> virer · <kbd>Espace</kbd> sauter / parachute · <kbd>B</kbd> leurre · <kbd>C</kbd> caméra · <kbd>R</kbd> recommencer · <kbd>P</kbd> pause</div>
 </div>
 
 <div id="titleScreen" class="screen">
@@ -221,6 +225,7 @@ body.touch #mpReady{bottom:140px;font-size:13px}
       <div></div><div style="opacity:.7;font-size:12px">L'incidence reste là où vous la laissez : réglez-la, puis lâchez la touche.</div>
       <div><kbd>←</kbd><kbd>→</kbd> / <kbd>Q</kbd><kbd>D</kbd></div><div>Virer (en wingsuit et sous voile)</div>
       <div><kbd>Espace</kbd></div><div>Sauter · Ouvrir le parachute</div>
+      <div><kbd>B</kbd></div><div>Larguer un leurre (3 par saut) : un petit parachute qui piège les poursuivants</div>
       <div><kbd>C</kbd> · <kbd>R</kbd> · <kbd>P</kbd></div><div>Caméra · Recommencer · Pause</div>
     </div>
     <div id="mpLobby" class="hidden">
@@ -431,6 +436,7 @@ function windAt(p,out){
     const ks=sstep(L.s0,L.s0+90,s)*(1-sstep(L.s1-90,L.s1,s));
     w=Math.max(w,LIFT_W*ks*sstep(.985,.87,ny)*sstep(-2,10,agl)*(1-sstep(60,210,agl)));}
   out.y=w*(.9+.1*Math.sin(p.x*.02+time*.7));
+  heliWash(p,out);
   return out;
 }
 
@@ -843,6 +849,186 @@ function trailsFrame(dt){
   trailUpdate(dt);
 }
 
+/* ================= LEURRES : petits parachutes largués pour gêner les poursuivants ================= */
+const DROPS=[],DROP_R=3.4,DROP_LIFE=40,DROP_MAX=3;let dropLeft=DROP_MAX,dropNext=0,dropSeq=0,myDrops=[];
+const lureGeo={dome:new THREE.SphereGeometry(1.5,14,6,0,Math.PI*2,0,Math.PI/2),band:new THREE.SphereGeometry(1.52,14,2,0,Math.PI*2,Math.PI*.3,Math.PI*.1),w:new THREE.BoxGeometry(.3,.4,.3)};
+function makeLure(col){const g=new THREE.Group();
+  const dome=new THREE.Mesh(lureGeo.dome,new THREE.MeshLambertMaterial({color:lin(col),side:THREE.DoubleSide}));dome.scale.y=.7;dome.position.y=2.2;g.add(dome);
+  const band=new THREE.Mesh(lureGeo.band,new THREE.MeshLambertMaterial({color:lin(0xffffff),side:THREE.DoubleSide}));band.scale.y=.7;band.position.y=2.2;g.add(band);
+  const pts=[];for(let i=0;i<6;i++){const a=i/6*6.283;pts.push(new V3(Math.cos(a)*1.45,2.2,Math.sin(a)*1.45),new V3(0,0,0));}
+  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0x333333})));
+  const w=new THREE.Mesh(lureGeo.w,new THREE.MeshLambertMaterial({color:lin(0x222222)}));w.position.y=-.1;g.add(w);
+  g.traverse(o=>{if(o.isMesh)o.castShadow=true;});g.userData.dome=dome;scene.add(g);return g;}
+function addDrop(o){const D=Object.assign({p0:new V3().fromArray(o.p),v0:new V3().fromArray(o.v),cur:new V3(),hit:false,dead:false,att:false},o);D.mesh=makeLure(o.col);DROPS.push(D);dropPos(D,0,D.cur);D.mesh.position.copy(D.cur);return D;}
+// trajectoire déterministe (identique chez tous les joueurs) : freinage puis descente lente sous la petite voile
+function dropPos(D,a,out){const k=.9,e=(1-Math.exp(-k*a))/k;
+  out.copy(D.p0).addScaledVector(D.v0,e);out.y-=4.2*(a-(1-Math.exp(-1.2*a))/1.2);
+  out.x+=1.5*(Math.sin(a*.7+D.id)-Math.sin(D.id));const g=groundH(out.x,out.z)+.3;D.ground=out.y<=g;if(D.ground)out.y=g;return out;}
+function dropLure(){
+  if(state!=='flying'||RP)return;const now=performance.now();
+  if(dropLeft<=0){toast('Plus de leurre à larguer !','warn',1400);return;}if(now<dropNext)return;
+  dropLeft--;dropNext=now+2500;const sp=P.vel.length()||1;
+  const p=P.pos.clone().addScaledVector(P.vel,-2.2/sp);p.y-=1.6;const v=P.vel.clone().multiplyScalar(.35);
+  const id=++dropSeq;myDrops.push({i:id,t:Math.round(now),p:p.toArray().map(r2),v:v.toArray().map(r2)});if(myDrops.length>DROP_MAX)myDrops.shift();
+  addDrop({own:true,peer:'me',id,t0:now,p:p.toArray(),v:v.toArray(),col:0xff6a10});
+  AU.pop&&AU.pop();toast('🪂 Leurre largué !  ('+dropLeft+' restant'+(dropLeft>1?'s':'')+')','fun',1600);
+}
+function dropsCheck(p){
+  for(const D of DROPS){if(D.own||D.dead||D.hit)continue;
+    _t3v.copy(D.cur);_t3v.y+=1.6;if(_t3v.distanceTo(p)<DROP_R){D.hit=true;D.att=true;P.tangle=2.6;
+      const G=MP.ghosts.get(D.peer);toast('Empêtré dans le leurre de '+(G?G.name:'quelqu’un')+' !','bad',2400);flash(.3,'#ffd0a0');AU.thud&&AU.thud();
+      MP.tg={p:D.peer,i:D.id};}}
+}
+function dropsFrame(dt){
+  const now=performance.now();
+  for(const D of DROPS){
+    if(D.att){if(P.tangle>0&&!RP&&(state==='flying'||state==='deploying')){const sp=P.vel.length()||1;D.mesh.position.copy(P.pos).addScaledVector(P.vel,-3.2/sp);
+        D.mesh.lookAt(P.pos);D.mesh.rotateX(Math.PI/2);continue;}D.dead=true;continue;}
+    const a=(now-D.t0)/1000;if(a>DROP_LIFE||a<-2){D.dead=true;continue;}
+    dropPos(D,Math.max(0,a),D.cur);D.mesh.position.copy(D.cur);
+    D.mesh.rotation.set(Math.sin(a*1.3+D.id)*.14,0,Math.cos(a*1.1+D.id)*.14);
+    const dm=D.mesh.userData.dome;dm.scale.y=D.ground?lerp(dm.scale.y,.12,1-Math.exp(-dt*2)):.7;}
+  for(let i=DROPS.length-1;i>=0;i--)if(DROPS[i].dead){scene.remove(DROPS[i].mesh);DROPS.splice(i,1);}
+  const b=$('btnDrop');if(b){b.style.display=state==='flying'&&!RP?'':'none';b.classList.toggle('off',dropLeft<=0);b.querySelector('i').textContent=dropLeft;}
+}
+// leurres des autres pilotes (présence « dr ») et retour « tu m’as eu » (présence « tg »)
+function mpDrops(peer,G,pr){
+  const num=a=>Array.isArray(a)&&a.length===3&&a.every(v=>typeof v==='number'&&isFinite(v));
+  if(!G.dropSeen)G.dropSeen=new Set();if(!G.tgSeen)G.tgSeen=new Set();
+  if(Array.isArray(pr.dr))for(const d of pr.dr.slice(0,DROP_MAX)){if(!d||!(d.i>0)||!isFinite(+d.t)||!num(d.p)||!num(d.v)||G.dropSeen.has(d.i))continue;G.dropSeen.add(d.i);
+    const t0=+d.t+(G.off||0);if((performance.now()-t0)/1000>DROP_LIFE)continue;
+    addDrop({own:false,peer,id:d.i|0,t0,p:d.p,v:d.v,col:G.col});}
+  const me=MP.peers.find(x=>x.sameTab);
+  if(pr.tg&&me&&pr.tg.p===me.peer&&!G.tgSeen.has(pr.tg.i)){G.tgSeen.add(pr.tg.i);S.score=(S.score||0)+150;toast('🎯 '+G.name+' s’est pris dans votre leurre !  +150','good',2600);}
+}
+
+/* ================= TRAFIC AÉRIEN : hélicoptères, parapentes, montgolfières =================
+   Trajectoires calculées à partir de l'heure (horloge murale partagée) → même position chez tous les joueurs, et rejouées dans les replays. */
+const AIR=[],AIRT={freezeT:0};
+const AIR_INFO={heli:{ic:'🚁',warn:'🚁 Hélicoptère droit devant !',near:'Hélico frôlé ! Le pilote a renversé son café.',lbl:'Hélicoptère',mm:'rgba(200,32,42,.9)'},
+  para:{ic:'🪂',warn:'🪂 Parapente droit devant !',near:'Parapente frôlé ! Il a fait un 360 de surprise.',lbl:'Parapente',mm:'rgba(40,160,255,.9)'},
+  balloon:{ic:'🎈',warn:'🎈 Montgolfière droit devant !',near:'Montgolfière frôlée ! Les passagers ont lâché leur champagne.',lbl:'Montgolfière',mm:'rgba(255,170,30,.9)'}};
+const _am=(c)=>new THREE.MeshLambertMaterial({color:lin(c)});
+function airAdd(g,geo,mat,x,y,z){const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.castShadow=true;g.add(m);return m;}
+function makeHeli(c1,c2){const g=new THREE.Group();
+  const red=_am(c1),yel=_am(c2),dk=_am(0x2a2e33),gl=new THREE.MeshPhongMaterial({color:lin(0x18283a),shininess:120,specular:0xaaaaaa});
+  const add=(geo,mat,x,y,z,p=g)=>airAdd(p,geo,mat,x,y,z);
+  add(new THREE.SphereGeometry(1,18,12),red,0,0,0).scale.set(1.5,1.45,2.9);
+  add(new THREE.SphereGeometry(1,16,10),gl,0,.3,-1.75).scale.set(1.25,1,1.35);
+  add(new THREE.SphereGeometry(1,16,6),yel,0,-.05,.1).scale.set(1.53,.35,2.6);
+  add(new THREE.CylinderGeometry(.36,.2,6.6,8),red,0,.45,4.9).rotation.x=Math.PI/2;
+  add(new THREE.BoxGeometry(.15,1.9,1.1),yel,0,1.25,8);add(new THREE.BoxGeometry(2.4,.1,.6),yel,0,.5,7.4);
+  add(new THREE.CylinderGeometry(.13,.13,.7,8),dk,0,1.6,0);add(new THREE.BoxGeometry(1.2,.5,2),red,0,1.3,.3);
+  for(const sd of[-1,1]){add(new THREE.CylinderGeometry(.08,.08,4.8,6),dk,sd*1.15,-1.8,-.2).rotation.x=Math.PI/2;
+    add(new THREE.BoxGeometry(.08,.7,.08),dk,sd*1.05,-1.45,-1.3);add(new THREE.BoxGeometry(.08,.7,.08),dk,sd*1.05,-1.45,1);}
+  const rot=new THREE.Group();rot.position.set(0,1.98,0);g.add(rot);
+  for(let i=0;i<3;i++){const b=add(new THREE.BoxGeometry(.38,.05,5.9),dk,0,0,0,rot);b.geometry.translate(0,0,2.95);b.rotation.y=i*2.094;}
+  const disc=new THREE.Mesh(new THREE.CircleGeometry(5.9,32),new THREE.MeshBasicMaterial({color:0x22262a,transparent:true,opacity:.13,depthWrite:false,side:THREE.DoubleSide}));disc.rotation.x=-Math.PI/2;rot.add(disc);
+  const tr=new THREE.Group();tr.position.set(.22,1.35,8.05);g.add(tr);add(new THREE.BoxGeometry(.05,1.7,.16),dk,0,0,0,tr);add(new THREE.BoxGeometry(.05,.16,1.7),dk,0,0,0,tr);
+  g.userData={rot,tr};scene.add(g);return g;}
+// parapente : voile en arc de 9 caissons (nez vers -Z), suspentes, pilote assis dans sa sellette
+function makePara(c1,c2){const g=new THREE.Group();const m1=_am(c1),m2=_am(c2),dk=_am(0x2a2e33);
+  const R=6.2,pts=[];
+  for(let i=0;i<9;i++){const a=(i-4)/4*.95,x=Math.sin(a)*R,y=7.6-(1-Math.cos(a))*R;
+    const c=airAdd(g,new THREE.BoxGeometry(1.6,.32,2.7-Math.abs(i-4)*.18),i%2?m2:m1,x,y,0);c.rotation.z=-a;
+    if(i%2===0){pts.push(new V3(x,y-.15,-.8),new V3(0,.6,0),new V3(x,y-.15,.9),new V3(0,.6,0));}}
+  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0x333333})));
+  airAdd(g,new THREE.BoxGeometry(.55,.5,.8),dk,0,0,.1);airAdd(g,new THREE.BoxGeometry(.45,.6,.35),m1,0,.45,-.05);
+  airAdd(g,new THREE.SphereGeometry(.2,10,8),_am(0xf4f4f4),0,.9,-.05);airAdd(g,new THREE.BoxGeometry(.3,.15,.75),dk,0,-.05,-.55);
+  scene.add(g);return g;}
+// montgolfière : enveloppe à fuseaux colorés, jupe, nacelle en osier, brûleur
+function makeBalloon(cols){const g=new THREE.Group();
+  const geo=new THREE.SphereGeometry(9,32,20);const pa=geo.attributes.position,ca=new Float32Array(pa.count*3),cc=cols.map(c=>new THREE.Color(c).convertSRGBToLinear());
+  for(let i=0;i<pa.count;i++){const y=pa.getY(i),k=y<0?1-.42*(-y/9):1;pa.setX(i,pa.getX(i)*k);pa.setZ(i,pa.getZ(i)*k);
+    const seg=Math.floor(((Math.atan2(pa.getZ(i),pa.getX(i))+Math.PI)/(Math.PI*2))*12+.5)%12,c=cc[seg%cc.length];ca[i*3]=c.r;ca[i*3+1]=c.g;ca[i*3+2]=c.b;}
+  geo.setAttribute('color',new THREE.BufferAttribute(ca,3));geo.computeVertexNormals();
+  const env=airAdd(g,geo,new THREE.MeshLambertMaterial({vertexColors:true}),0,17,0);env.scale.y=1.15;
+  airAdd(g,new THREE.CylinderGeometry(4.6,1.6,3.6,16,1,true),new THREE.MeshLambertMaterial({color:cc[0],side:THREE.DoubleSide}),0,5.3,0);
+  airAdd(g,new THREE.BoxGeometry(1.6,1.1,1.6),_am(0x8a5a2b),0,0,0);
+  airAdd(g,new THREE.CylinderGeometry(.35,.35,.5,8),_am(0x777777),0,2.2,0);
+  const fl=new THREE.Mesh(new THREE.ConeGeometry(.35,1.4,8),new THREE.MeshBasicMaterial({color:0xffa640,transparent:true,opacity:.85}));fl.position.set(0,3.1,0);g.add(fl);
+  const pts=[];for(let i=0;i<4;i++){const a=i*1.571+.785;pts.push(new V3(Math.cos(a)*.8,.55,Math.sin(a)*.8),new V3(Math.cos(a)*1.7,3.6,Math.sin(a)*1.7));}
+  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0x3a2a1a})));
+  g.userData={fl};scene.add(g);return g;}
+// --- trajectoires ---
+function terrainTop(x,z,r){let gm=-1e9;for(let k=0;k<5;k++){const ox=k===0?0:Math.cos(k*1.571)*r,oz=k===0?0:Math.sin(k*1.571)*r;gm=Math.max(gm,groundH(x+ox,z+oz));}return gm;}
+/* trajectoire de référence des pilotes (altitude typique selon la distance) : les appareils volent dessus */
+const REF_Y=[[0,1850],[380,1440],[600,1385],[830,1310],[1100,1170],[1350,1063],[1450,1000],[1700,880],[2000,900],[2300,850],[2450,790],[2700,660],[2950,524],[3100,470],[3400,520],[3700,560],[3850,520],[4000,430],[4200,280],[4350,168]];
+function refY(s){return tab(REF_Y,s);}
+function refX(s){if(s>LANE_S0-40&&s<WALL_S-40)return laneX(s);let x=xc(s),wsum=0,acc=0;
+  for(const L of LIFTS){const k=sstep(L.s0,L.s0+140,s)*(1-sstep(L.s1-140,L.s1,s));if(k>0){acc+=k*L.side*(tab(WID,s)+35);wsum+=k;}}
+  return x+(wsum>1?acc/wsum:acc);}
+// va-et-vient doux sur un tronçon [s0,s1] du parcours, à vitesse moyenne v
+/* chaque appareil tourne en boucle étroite (ovale) sur son propre tronçon de la trajectoire des pilotes :
+   même ligne, même altitude, et jamais deux appareils sur le même tronçon */
+const AIR_DY={heli:0,para:-4,balloon:-17};// décalage du point de référence (rotor / sellette / nacelle) pour que l'appareil soit centré sur la trajectoire
+function trackPath(t,out,o){const mid=(o.s0+o.s1)/2,half=(o.s1-o.s0)/2,per=(4*half+2*o.loop)/o.v,ph=(t+o.ph)*2*Math.PI/per;
+  const s=mid+half*Math.cos(ph),x=refX(s)+o.loop*Math.sin(ph)+o.sw*Math.sin((t+o.ph)*2*Math.PI/19);
+  let y=refY(s)+AIR_DY[o.k]+4*Math.sin((t+o.ph)*.37);y=Math.max(y,terrainTop(x,-s,o.k==='balloon'?14:10)+o.m);
+  return out.set(x,y,-s);}
+function addAir(kind,g,path,o,climb,sink){o.k=kind;const A={kind,g,path,o,climb,sink,pos:new V3(),vel:new V3(),hd:0,ys:null,warnT:-99,id:AIR.length};AIR.push(A);return A;}
+const airH=(c1,c2,s0,s1,ph)=>addAir('heli',makeHeli(c1,c2),trackPath,{s0,s1,v:12,loop:14,sw:3,m:22,ph},22,9);
+const airP=(c1,c2,s0,s1,ph)=>addAir('para',makePara(c1,c2),trackPath,{s0,s1,v:9.5,loop:12,sw:2,m:22,ph},20,10);
+const airB=(cols,s0,s1,ph)=>addAir('balloon',makeBalloon(cols),trackPath,{s0,s1,v:3.5,loop:10,sw:2,m:6,ph},8,4);
+// tronçons (s en m) — la gorge (360-600) et les arches (1330-1400, 2930-3000) restent libres
+airB([0xe8312a,0xffd23a,0x2b78e4,0xffffff],650,800,0);              // sortie de gorge
+airH(0xc8202a,0xf0c020,880,1270,0);                                   // trouée en forêt
+airP(0xff3d7a,0xffd23a,1440,1640,0);                                 // bassin 1, pente gauche
+airH(0xf2f2f2,0xd8262c,1690,1890,20);
+airP(0x00b3c7,0xffffff,1940,2110,40);
+airP(0x31c46b,0x1d3d8a,2160,2410,10);                                // pente droite vers le col 1
+airB([0xff4a4a,0x2fd27a,0xffffff],2490,2680,90);                      // après le col 1
+airH(0x2a2e33,0xff7a1a,2730,2890,50);                                 // avant l'arche 2
+airP(0x8a4bff,0xff8a1a,3040,3240,30);                                // bassin 2, pente droite
+airH(0x1f5fbf,0xf2f2f2,3290,3480,70);
+airP(0xffe14a,0xd8262c,3530,3680,60);
+airB([0x7a3ae0,0xffffff,0xffd23a],3730,3830,130);                     // avant le col du Dernier Espoir
+airP(0xff6ad5,0x3a2a8a,3900,4080,20);                                // approche finale
+airB([0x20a46b,0xfff2c0,0xff7a1a],4130,4290,200);                     // au-dessus de la cible
+const HELI=AIR[0];// compatibilité (débogage)
+function airT(){if(AIRT.freezeT)return AIRT.freezeT;if(RP){const [a,b,k]=frameAt(RP.t);if(a.hw)return lerp(a.hw,b.hw||a.hw,k);}return Date.now()/1000;}
+const _hp=new V3(),_hn=new V3();
+function heliFrame(dt){
+  const t=airT();
+  for(const A of AIR){const g=A.g;A.path(t,A.pos,A.o);
+    // vitesse verticale bornée ; recalage direct en cas de saut de temps (replay)
+    const ty=A.pos.y;if(A.ys==null||Math.abs(ty-A.ys)>250||!(dt>0))A.ys=ty;else A.ys+=clamp(ty-A.ys,-A.sink*dt,A.climb*dt);A.pos.y=A.ys;
+    A.path(t+.5,_hn,A.o);A.path(t-.5,_hp,A.o);
+    A.vel.copy(_hn).sub(_hp);const sp=Math.hypot(A.vel.x,A.vel.z);if(sp>.3)A.hd=Math.atan2(A.vel.x,-A.vel.z);const hd=A.hd;
+    const acc=_hn.add(_hp).addScaledVector(A.pos,-2).multiplyScalar(4),right=_hp.set(Math.cos(hd),0,Math.sin(hd));
+    g.position.copy(A.pos);
+    if(A.kind==='heli'){const bank=clamp(acc.dot(right)*.06,-.45,.45);g.rotation.set(-clamp(sp*.006,0,.22),-hd,-bank,'YXZ');
+      g.userData.rot.rotation.y+=dt*38;g.userData.tr.rotation.x+=dt*55;}
+    else if(A.kind==='para'){const bank=clamp(acc.dot(right)*.09,-.5,.5);g.rotation.set(0,-hd,-bank,'YXZ');}
+    else{g.rotation.set(0,t*.05+A.id,0);const f=g.userData.fl;f.visible=(Math.sin(t*.9+A.id*3)>.35);f.scale.y=.8+Math.random()*.5;}
+    if(state==='flying'&&!RP){const rel=_hn.copy(A.pos).sub(P.pos),d=rel.length(),v=P.vel.length()||1;
+      if(d<380&&rel.dot(P.vel)/v>d*.7&&time-A.warnT>15){A.warnT=time;toast(AIR_INFO[A.kind].warn,'warn',1800);}}}
+}
+// collisions : renvoie la cause du crash ou null
+function airHit(p){
+  for(const A of AIR){const H=A.pos,dx=p.x-H.x,dy=p.y-H.y,dz=p.z-H.z;if(dx*dx+dy*dy+dz*dz>900)continue;
+    const fx=Math.sin(A.hd),fz=-Math.cos(A.hd);
+    if(A.kind==='heli'){const along=clamp(dx*fx+dz*fz,-8.2,3.2);
+      if(Math.hypot(dx-fx*along,dy,dz-fz*along)<(along<-3.5?.9:2.1))return 'heli';
+      if(Math.abs(dy-1.98)<.8&&Math.hypot(dx,dz)<6.1)return 'heli';}
+    else if(A.kind==='para'){const fw=dx*fx+dz*fz,sd=dx*-fz+dz*fx;
+      if(Math.hypot(dx,dy-.3,dz)<1.2)return 'para';
+      const a=Math.asin(clamp(sd/6.2,-1,1));if(Math.abs(a)<1.02&&Math.abs(fw)<1.6&&Math.abs(dy-(7.6-(1-Math.cos(a))*6.2))<1)return 'para';}
+    else{const ey=dy-17,k=ey<0?1-.42*(-ey/9):1;
+      if(Math.hypot(dx/k,ey/(1.15*9)*9,dz/k)<9.3)return 'balloon';
+      if(Math.abs(dx)<1.1&&Math.abs(dz)<1.1&&dy>-.8&&dy<4)return 'balloon';}}
+  return null;}
+function heliWash(p,out){for(const A of AIR){if(A.kind!=='heli')continue;const H=A.pos,r=Math.hypot(p.x-H.x,p.z-H.z),dy=H.y-p.y;
+  if(r<11&&dy>-1&&dy<45)out.y-=12*(1-r/11)*(1-Math.max(0,dy)/45);}}
+// frôlages : bonus une fois par appareil et par vol
+function airNear(p){if(!S.airNear)S.airNear={};
+  for(const A of AIR){if(S.airNear[A.id])continue;const c=A.pos.clone();if(A.kind==='balloon')c.y+=13;if(A.kind==='para')c.y+=4;
+    const d=p.distanceTo(c),lim=A.kind==='balloon'?28:20;
+    if(d<lim){S.airNear[A.id]=true;S.score+=200;const I=AIR_INFO[A.kind];toast(I.near+'  +200','good',2400);
+      recEvent('heli',I.lbl+' frôlé'+(A.kind==='balloon'?'e':'')+' à '+fmt1(Math.max(0,d-(A.kind==='balloon'?11:3)))+' m',Math.max(0,d-3),false);}}}
+function airMinimap(g){g.font='10px system-ui';g.textAlign='center';g.textBaseline='middle';
+  for(const A of AIR){const I=AIR_INFO[A.kind],x=mmx(A.pos.x),y=mmy(-A.pos.z);g.fillStyle=I.mm;g.beginPath();g.arc(x,y,5,0,6.283);g.fill();g.fillText(I.ic,x,y);}}
+
 function buildProps(){
   // exit cairn + guide
   const rock=new THREE.MeshLambertMaterial({color:lin(0x7d776e)});
@@ -965,7 +1151,7 @@ const fmt1=v=>Math.max(0,v).toFixed(1).replace('.',',');
 function recEvent(type,label,clear,must,t){REC.events.push({type,label,clear,must,t:t===undefined?REC.t:t});}
 function resetStats(){S={t:0,maxSpd:0,proxT:0,near:0,holes:WALLS.map(()=>false),cols:COLS.map(()=>false),lane:false,liftMin:Infinity,liftGain:0,deployAgl:null,deploySpd:0,startS:0,flags:{},lastToast:0,score:0,inLift:false};}
 resetStats();
-window.__cw={P,get S(){return S;},get state(){return state;},get DBG(){return DBG;},keys,laneX,xc,groundH,WALLS,COLS,LAKES,TARGET,NEEDLES,ARCHES,physicsStep:h=>physicsStep(h),REC,LIFTS,GORGE,windAt,startReplay,get RPLIST(){return RPLIST;},get RP(){return RP;},W:s=>tab(WID,s),F:s=>tab(FLOOR,s),get trees(){return treeList.length;}};
+window.__cw={P,get S(){return S;},get state(){return state;},get DBG(){return DBG;},keys,laneX,xc,groundH,WALLS,COLS,LAKES,TARGET,NEEDLES,ARCHES,physicsStep:h=>physicsStep(h),REC,LIFTS,GORGE,windAt,startReplay,get RPLIST(){return RPLIST;},get RP(){return RP;},W:s=>tab(WID,s),F:s=>tab(FLOOR,s),get trees(){return treeList.length;},HELI,AIR,AIRT,DROPS,addDrop,trackPath};
 
 const _t1=new V3(),_t2=new V3(),_w=new V3(),_v=new V3(),_F=new V3(),_Rh=new V3(),_U=new V3(),_R=new V3(),_L=new V3(),_M=new THREE.Matrix4(),_q=new THREE.Quaternion(),UP=new V3(0,1,0);
 function hangQuat(h,out){const f=_t1.set(Math.sin(h),0,-Math.cos(h)),r=_t2.set(Math.cos(h),0,Math.sin(h));_M.makeBasis(r,_v.copy(f).negate(),_U.set(0,-1,0));return out.setFromRotationMatrix(_M);}
@@ -988,6 +1174,9 @@ const DEATH={
   wall:['L’arche était juste à côté. La paroi, elle, était partout ailleurs.','Vous avez laissé une jolie empreinte façon dessin animé dans la roche.','Les grimpeurs ont une nouvelle prise : vous.','Toc toc. Qui est là ? Plus personne.'],
   lowchute:['Le parachute s\'est ouvert pile à l\'impact. Il tient à préciser que ce n\'est pas sa faute.','Ouverture « légèrement tardive », selon le rapport d\'enquête.','Le parachute a fait de son mieux. Vous, un peu moins.'],
   nochute:['Vous avez oublié un détail : le parachute. Il est toujours plié, tout neuf, impeccable.','Atterrir sans parachute : audacieux, mais déconseillé par 10 kinés sur 10.','Les vaches ont assisté à la scène. Elles ne mangeront pas d\'herbe aujourd\'hui.'],
+  para:['Vous vous êtes invité dans la voile d’un parapentiste. Il n’avait pas prévu de biplace.','Collision avec un parapente : le parapentiste raconte déjà l’histoire au bar du déco.','Les suspentes, ce n’est pas un filet de sécurité.'],
+  balloon:['Vous avez crevé le rêve de huit touristes et de leur pilote.','Une montgolfière, c’est gros, c’est lent, c’est coloré. Et vous l’avez quand même percutée.','Les passagers de la nacelle ont pris la meilleure photo de leur vie.'],
+  heli:['Vous avez voulu faire du stop à un hélicoptère. Il ne s’arrête pas.','Le rotor a gagné. Le pilote, lui, doit changer de pantalon.','L’hélico de secours est arrivé avant même l’accident. Efficace.'],
   out:['Vous avez quitté la zone. La Suisse refuse votre entrée sans visa.']
 };
 const FUN=[()=>`Facture de l'hélico de secours : ${Math.round(3000+Math.random()*9000).toLocaleString('fr-FR')} €`,()=>`Appels manqués de votre mère : ${2+Math.floor(Math.random()*30)}`,
@@ -1004,6 +1193,7 @@ function onKey(code){const e={code};
     else if(code==='Escape'||code==='Enter')specExit(true);else if(code==='KeyR')resetRun();return;}
   if(endShown&&!RP&&(code==='KeyV'||code==='KeyN'||code==='Tab')&&specAvail().length){specEnter();return;}
   if(e.code==='Space'){if(state==='title')startGame();else if(state==='ready')doJump();else if(state==='flying')deploy();}
+  if(e.code==='KeyB'&&!RP)dropLure();
   if(RP&&(e.code==='Escape'||e.code==='Enter')){stopReplay(true);return;}
   if(RP&&(e.code==='KeyV'||e.code==='KeyC')){rpView();return;}
   if(endShown&&!RP&&/^(Digit|Numpad)\d$/.test(e.code)){const n=+e.code.slice(-1);if(n===0)startReplay(null);else if(RPLIST[n-1])startReplay(RPLIST[n-1]);return;}
@@ -1080,7 +1270,7 @@ tap('tbMode',()=>setMode(ctlMode==='gyro'?'pad':'gyro',true));
 document.querySelectorAll('#cpRow button').forEach(b=>b.addEventListener('click',()=>{onKey('Digit'+b.dataset.cp);gyroCal();}));
 document.querySelectorAll('#ctlMode button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.m,false)));
 tap('pauseResume',()=>{if(paused)onKey('KeyP');});
-tap('replayBack',()=>onKey('Escape'));tap('replayViewB',()=>rpView());
+tap('replayBack',()=>onKey('Escape'));tap('btnDrop',()=>onKey('KeyB'));tap('replayViewB',()=>rpView());
 tap('rotateSkip',()=>document.body.classList.add('noRotate'));
 function goFull(){if(!TOUCH)return;const d=document.documentElement,f=d.requestFullscreen||d.webkitRequestFullscreen;
   try{const p=f&&f.call(d,{navigationUI:'hide'});const lock=()=>{try{screen.orientation.lock('landscape').catch(()=>{});}catch(e){}};if(p&&p.then)p.then(lock).catch(()=>{});else lock();}catch(e){}}
@@ -1104,7 +1294,8 @@ function startGame(){if(state!=='title')return;document.body.classList.add('play
 function resetRun(){
   if(SPEC.on)specExit(false);
   state='ready';paused=false;endShown=false;practice=false;$('pauseScreen').classList.add('hidden');$('endScreen').classList.add('hidden');
-  P.heading=0;P.pos.set(EXIT.x,groundH(EXIT.x,EXIT.z)+1.15,EXIT.z);mpPlaceStart(true);P.vel.set(0,0,0);P.alpha=11;P.trim=11;P.bank=0;P.rightH.set(1,0,0);P.idle=0;P.blend=0;P.rag=null;P.crashCause=null;P.flare=0;P.flareHold=0;P.turn=0;P.landKind=null;
+  P.heading=0;P.pos.set(EXIT.x,groundH(EXIT.x,EXIT.z)+1.15,EXIT.z);mpPlaceStart(true);P.vel.set(0,0,0);P.alpha=11;P.trim=11;P.bank=0;P.rightH.set(1,0,0);P.idle=0;P.blend=0;P.rag=null;P.crashCause=null;P.flare=0;P.flareHold=0;P.turn=0;P.landKind=null;P.tangle=0;dropLeft=DROP_MAX;myDrops=[];MP.tg=null;
+  for(const D of DROPS)if(D.own||D.att)D.dead=true;
   hangQuat(0,P.quat);canopyG.visible=false;canopyG.scale.set(1,1,1);canopyG.rotation.set(0,0,0);
   const h=jumper.userData.helmet;if(h.parent!==jumper){h.parent.remove(h);jumper.add(h);h.position.set(0,.02,-.53);h.rotation.set(0,0,0);h.userData.vel=null;}
   if(RP)stopReplay(false);
@@ -1162,6 +1353,7 @@ function stepWingsuit(h,ctl){
   _L.crossVectors(_R,_F).normalize();
   const rho=1.225*Math.exp(-P.pos.y/8500),q=.5*rho*sp*sp,[CL,CD]=aero(P.alpha,sp),k=q*WS.S/WS.m;
   P.vel.addScaledVector(_L,k*CL*h).addScaledVector(_F,-k*CD*h);P.vel.y-=9.81*h;
+  if(P.tangle>0){P.tangle-=h;P.vel.multiplyScalar(1-1.15*h);P.bank+=Math.sin(time*8.3)*90*h;}
   P.pos.addScaledVector(P.vel,h);
   const a=(P.alpha+(P.stalled?Math.sin(P.buf*9)*25:0))*DEG;P.fwd.copy(_F).multiplyScalar(Math.cos(a)).addScaledVector(_L,Math.sin(a)).normalize();
   P.upB.crossVectors(_R,P.fwd).normalize();P.right.crossVectors(P.fwd,P.upB).normalize();
@@ -1217,6 +1409,9 @@ function physicsStep(h){
     if(tr){crash(state==='deploying'?'lowchute':(tr.rock||tr.needle)?'rock':'tree');return;}
     const ah=archHit(p);if(ah){crash(state==='deploying'?'lowchute':'arch');return;}
     if(inChalet(p)){crash(state==='deploying'?'lowchute':'terrain');return;}
+    {const ac=airHit(p);if(ac){crash(ac);return;}}
+    dropsCheck(p);
+    if(state==='flying')airNear(p);
     WALLS.forEach((W,i)=>{if(!S.holes[i]&&P.prevZ>W.zc&&p.z<=W.zc&&holeQ(W,p.x,p.y)<1){S.holes[i]=true;S.score+=500;if(!MP.race)timeScale=.35;flash(.35,'#ffb066');toast(W.short+' FRANCHI !  +500','good big',3000);AU.whoosh();
       const c=slotClear(W,p.x,p.y);
       recEvent('hole',W.name+' — à '+fmt1(c)+' m de la roche',c,true);}});
@@ -1236,6 +1431,7 @@ function physicsStep(h){
       else if(REC.ep&&agl>18){recEvent('sol','Rase-mottes à '+fmt1(REC.ep.min)+' m du sol, '+Math.round(REC.ep.v*3.6)+' km/h',REC.ep.min,false,REC.ep.t);REC.ep=null;}}
   }else if(state==='canopy'){
     if(wallHit(p)||archHit(p)){land('wall');return;}
+    {const ac=airHit(p);if(ac){crash(ac);return;}}
     if(treeCheck(p,false)){land('tree');return;}
     if(inChalet(p)&&p.y-1<chalet.userData.box.top){land('roof');return;}
     if(inLake(p.x,s,p.y-1.45)){land('lake');return;}
@@ -1458,6 +1654,7 @@ function buildMinimap(){const c=document.createElement('canvas');c.width=MM.w;c.
 function drawMinimap(){const cv=$('minimap'),g=cv.getContext('2d');if(!mmBase)return;g.drawImage(mmBase,0,0);
   const X=mmx(P.pos.x),Y=mmy(-P.pos.z);const hd=Math.hypot(P.vel.x,P.vel.z)>1?Math.atan2(P.vel.x,-P.vel.z):P.heading;
   mpMinimap(g);
+  airMinimap(g);
   g.save();g.translate(X,Y);g.rotate(hd);g.fillStyle='#ffe14a';g.strokeStyle='#000';g.lineWidth=1;g.beginPath();g.moveTo(0,-7);g.lineTo(4.5,5);g.lineTo(0,2.5);g.lineTo(-4.5,5);g.closePath();g.fill();g.stroke();g.restore();}
 
 /* ================= CAMERA ================= */
@@ -1577,7 +1774,7 @@ function recFrame(dt){
   if(RP||endShown||!REC_STATES.includes(state))return;
   REC.t+=dt;REC.acc+=dt;if(REC.acc<1/30&&REC.frames.length)return;REC.acc=0;
   const q=jumper.quaternion,aL=jumper.userData.arms[0],h=jumper.userData.helmet,det=h.parent!==jumper,cv=canopyG.visible;
-  REC.frames.push({t:REC.t,a:state==='flying'||state==='deploying'||state==='canopy'?1:0,p:[P.pos.x,P.pos.y,P.pos.z],q:[q.x,q.y,q.z,q.w],bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR],cv,
+  REC.frames.push({t:REC.t,hw:Date.now()/1000,a:state==='flying'||state==='deploying'||state==='canopy'?1:0,p:[P.pos.x,P.pos.y,P.pos.z],q:[q.x,q.y,q.z,q.w],bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR],cv,
     cp:cv?canopyG.position.toArray():null,cr:cv?[canopyG.rotation.x,canopyG.rotation.y,canopyG.rotation.z]:null,cs:cv?canopyG.scale.toArray():null,
     hp:det?[h.position.x,h.position.y,h.position.z,h.rotation.x,h.rotation.y,h.rotation.z]:null});
 }
@@ -1599,7 +1796,7 @@ function applyRec(t){const [a,b,k]=frameAt(t);
   if(a.hp){if(h.parent===jumper){jumper.remove(h);scene.add(h);}h.position.set(a.hp[0],a.hp[1],a.hp[2]);h.rotation.set(a.hp[3],a.hp[4],a.hp[5]);}
   else if(h.parent!==jumper){h.parent.remove(h);jumper.add(h);h.position.set(0,.02,-.53);h.rotation.set(0,0,0);}
 }
-const EV_ICON={tree:'🌲',rock:'🪨',needle:'🗻',arch:'🌉',sol:'⛰️',hole:'🕳️',col:'🏔️',gorge:'✂️',crash:'💥',land:'🪂'};
+const EV_ICON={heli:'🚁',tree:'🌲',rock:'🪨',needle:'🗻',arch:'🌉',sol:'⛰️',hole:'🕳️',col:'🏔️',gorge:'✂️',crash:'💥',land:'🪂'};
 function moments(){
   const ev=REC.events.slice();
   treeList.concat(NEEDLES).forEach(t=>{if(t.nearMin!==null)ev.push({type:t.needle?'needle':t.rock?'rock':'tree',label:(t.needle?'Frôlage d’aiguille':t.rock?'Frôlage de rocher':'Frôlage de sapin')+' à '+fmt1(t.nearMin)+' m, '+Math.round(t.nearV*3.6)+' km/h',clear:t.nearMin,must:false,t:t.nearT});});
@@ -1691,7 +1888,7 @@ function frame(now){
   if(state==='loading'){renderer.render(scene,camera);return;}
   mpTick(dtR);
   if(paused){renderer.render(scene,camera);return;}
-  if(RP){time+=dtR;const rpT=RP.t;updateReplay(dtR);if(RP)trailsFrame(Math.max(0,RP.t-rpT));fxUpdate(dtR);updateStreaks(_t1.set(0,0,0),camera.position);sky.position.copy(camera.position);renderer.render(scene,camera);return;}
+  if(RP){time+=dtR;const rpT=RP.t;updateReplay(dtR);if(RP){trailsFrame(Math.max(0,RP.t-rpT));heliFrame(dtR);}fxUpdate(dtR);updateStreaks(_t1.set(0,0,0),camera.position);sky.position.copy(camera.position);renderer.render(scene,camera);return;}
   timeScale=lerp(timeScale,1,1-Math.exp(-dtR*(state==='crashed'?.9:2.2)));
   const dt=dtR*timeScale;time+=dt;
   if(state==='ready'){P.idle+=dt;
@@ -1711,6 +1908,7 @@ function frame(now){
   sun.position.copy(P.pos).addScaledVector(SUN_DIR,450);sun.target.position.copy(P.pos);
   sky.position.copy(camera.position);
   updateHUD(dtR);if(TOUCH)actLabel();
+  heliFrame(dtR);dropsFrame(dtR);
   trailsFrame(paused?0:dtR*timeScale);
   renderer.render(scene,camera);
 }
@@ -1840,6 +2038,7 @@ function mpSample(p){
   if(isFinite(ts)&&ts>0){const off=recv-ts;
     // décalage d’horloge : on retient le trajet le plus rapide, avec une lente dérive pour suivre les variations
     if(G.off==null||off<G.off||Math.abs(off-G.off)>5000)G.off=off;else G.off+=(off-G.off)*.01;st0=ts;}else G.off=0;
+  mpDrops(p.peer,G,pr);
   if(G.s.length&&st0<=G.s[G.s.length-1].t)return;
   const smp={t:st0,st:String(pr.st||''),p:pr.p,q:num(pr.q)&&pr.q.length===4?pr.q:[0,0,0,1],bp:num(pr.bp)&&pr.bp.length===7?pr.bp:[1,0,.4,0,0,0,0],cv:!!pr.cv,cp:num(pr.cp)?pr.cp:null,cq:num(pr.cq)?pr.cq:null};
   if(!num(smp.p))return;
@@ -1919,7 +2118,7 @@ function mpSend(){
   {MP.lastSend=performance.now();const q=jumper.quaternion,cv=canopyG.visible;
     const pr={n:MP.nick,c:MP.col,st:RP?'replay':state,p:[r2(P.pos.x),r2(P.pos.y),r2(P.pos.z)],q:[r3(q.x),r3(q.y),r3(q.z),r3(q.w)],
       bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR].map(r2),cv,cp:cv?canopyG.position.toArray().map(r2):null,cq:cv?canopyG.quaternion.toArray().map(r3):null,
-      s:Math.round(Math.max(0,-P.pos.z)),r:MP.race?MP.race.id:null,res:MP.res,go:MP.go,ts:Math.round(performance.now()),
+      s:Math.round(Math.max(0,-P.pos.z)),r:MP.race?MP.race.id:null,res:MP.res,go:MP.go,ts:Math.round(performance.now()),dr:myDrops,tg:MP.tg||null,
       dg:{v:6,via:MP.via,code:MP.code,con:MP.conn?1:0,np:MP.peers.length,nv:mpOthers().length,err:MP.err,gh:MP.ghosts.size}};
     if(RP){pr.p=[0,-9999,0];}
     MP.room.presence(pr).catch(e=>{MP.err='pres:'+(e&&e.code);});}
