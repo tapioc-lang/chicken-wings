@@ -117,7 +117,8 @@ body.touch .brief{font-size:13px}
 #ctlMode button small{display:block;font-weight:500;font-size:11px;opacity:.75;margin-top:2px}
 #ctlMode button.on{background:var(--accent);color:#1b0b00;border-color:var(--accent)}
 .tlist{font-size:13px;line-height:1.55;opacity:.9;margin:0 0 6px}
-#replayBack{pointer-events:auto;margin-left:12px;padding:8px 14px;font-size:13px}
+#replayBack,#replayViewB{pointer-events:auto;margin-left:12px;padding:8px 14px;font-size:13px}
+#replayViewB{background:rgba(8,14,22,.7);color:#fff;border:1px solid rgba(255,255,255,.25)}
 #pauseResume{margin-top:12px}
 #rotateHint{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:rgba(5,10,16,.92);text-align:center;padding:24px;font-weight:700}
 #rotateHint .ph{font-size:56px;animation:rot 2s ease-in-out infinite}
@@ -248,7 +249,7 @@ body.touch #mpReady{bottom:140px;font-size:13px}
   </div>
 </div>
 
-<div id="replayBar" class="hidden"><div><span class="rec">● REPLAY</span> &nbsp; <span id="replayLabel"></span></div><div style="display:flex;align-items:center"><div id="replayHint">Échap : retour · R : recommencer</div><button id="replayBack">✕ Retour</button></div></div>
+<div id="replayBar" class="hidden"><div><span class="rec">● REPLAY</span> &nbsp; <span id="replayLabel"></span></div><div style="display:flex;align-items:center"><div id="replayHint">Échap : retour · R : recommencer</div><button id="replayViewB">🎥 <span id="replayViewN">Auto</span></button><button id="replayBack">✕ Retour</button></div></div>
 <div id="mpCD"></div>
 <div id="specBar" class="hidden"><div><span class="t">👁 SPECTATEUR</span><span id="specName"></span><div id="specInfo"></div></div>
   <div id="specBtns"><button id="specNextB">👤 Pilote suivant<kbd>N</kbd></button><button id="specViewB">🎥 <span id="specViewN">Poursuite</span><kbd>V</kbd></button><button id="specExitB">✕ Retour<kbd>Échap</kbd></button></div></div>
@@ -775,6 +776,73 @@ class Smoke{
     const sc=(2+a*4.5)*this.size;p.s.scale.set(sc,sc,1);p.s.material.opacity=.75*sstep(0,.4,a)*(1-a/p.life);}}
 }
 
+/* fumigène attaché au pied droit de chaque pilote : traînée de particules en coordonnées monde */
+const TRAIL={N:4200,i:0,em:new Map()};
+{ const N=TRAIL.N,geo=new THREE.BufferGeometry();
+  TRAIL.pos=new Float32Array(N*3);TRAIL.vel=new Float32Array(N*3);TRAIL.age=new Float32Array(N).fill(1e9);TRAIL.life=new Float32Array(N).fill(1);
+  TRAIL.col=new Float32Array(N*4);TRAIL.size=new Float32Array(N);TRAIL.base=new Float32Array(N*3);TRAIL.rot=new Float32Array(N);
+  geo.setAttribute('position',new THREE.BufferAttribute(TRAIL.pos,3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('rgba',new THREE.BufferAttribute(TRAIL.col,4).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('size',new THREE.BufferAttribute(TRAIL.size,1).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('rot',new THREE.BufferAttribute(TRAIL.rot,1));
+  const mat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,fog:true,
+    uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,{map:{value:null},pscale:{value:400}}]),
+    vertexShader:`attribute float size;attribute vec4 rgba;attribute float rot;varying vec4 vC;varying float vR;uniform float pscale;
+      #include <fog_pars_vertex>
+      void main(){vC=rgba;vR=rot;vec4 mvPosition=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*mvPosition;
+        vC.a*=smoothstep(3.,14.+size,-mvPosition.z); // transparente quand la caméra la traverse
+        gl_PointSize=rgba.a<=0.?0.:clamp(size*pscale/max(-mvPosition.z,.1),0.,512.);
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform sampler2D map;varying vec4 vC;varying float vR;
+      #include <fog_pars_fragment>
+      void main(){vec2 p=gl_PointCoord-.5;float c=cos(vR),s=sin(vR);p=mat2(c,-s,s,c)*p+.5;
+        vec4 t=texture2D(map,p);float d=1.-smoothstep(.3,.5,length(gl_PointCoord-.5));
+        gl_FragColor=vec4(vC.rgb,vC.a*min(1.,t.a*2.2+.25)*d);if(gl_FragColor.a<.004)discard;
+        #include <fog_fragment>
+      }`});
+  mat.uniforms.map.value=smokeTex;
+  TRAIL.pts=new THREE.Points(geo,mat);TRAIL.pts.frustumCulled=false;TRAIL.pts.renderOrder=2;scene.add(TRAIL.pts);
+}
+const _tf=new V3(),_tc=new THREE.Color(),_t3v=new V3();
+function trailEmit(key,J,col,on,dt,vel){
+  let E=TRAIL.em.get(key);if(!E){E={p:new V3(),has:false,acc:0,c:new THREE.Color()};TRAIL.em.set(key,E);}
+  if(!on||!J||!J.visible){E.has=false;return;}
+  J.updateMatrixWorld(true);J.userData.shins[1].localToWorld(_tf.set(0,-.03,.5));
+  E.c.set(col).lerp(_tc.set(0xffffff),.15).convertSRGBToLinear();
+  if(!E.has||E.p.distanceTo(_tf)>40){E.p.copy(_tf);E.has=true;E.acc=0;return;} // téléportation : pas de traînée parasite
+  E.acc+=dt*55;const n=Math.min(40,Math.floor(E.acc));E.acc-=n;
+  for(let k=0;k<n;k++){const i=TRAIL.i;TRAIL.i=(TRAIL.i+1)%TRAIL.N;const f=(k+1)/n;
+    TRAIL.base[i*3]=lerp(E.p.x,_tf.x,f);TRAIL.base[i*3+1]=lerp(E.p.y,_tf.y,f);TRAIL.base[i*3+2]=lerp(E.p.z,_tf.z,f);
+    for(let a=0;a<3;a++)TRAIL.pos[i*3+a]=TRAIL.base[i*3+a];
+    TRAIL.vel[i*3]=(vel?vel.x*.12:0)+(Math.random()-.5)*1.4;TRAIL.vel[i*3+1]=(vel?vel.y*.12:0)+(Math.random()-.5)*1.4;TRAIL.vel[i*3+2]=(vel?vel.z*.12:0)+(Math.random()-.5)*1.4;
+    TRAIL.age[i]=(1-f)*dt;TRAIL.life[i]=6+Math.random()*2.5;TRAIL.rot[i]=Math.random()*6.28;
+    TRAIL.col[i*4]=E.c.r;TRAIL.col[i*4+1]=E.c.g;TRAIL.col[i*4+2]=E.c.b;}
+  E.p.copy(_tf);
+}
+function trailUpdate(dt){
+  const N=TRAIL.N,P3=TRAIL.pos,Vv=TRAIL.vel;
+  for(let i=0;i<N;i++){let a=TRAIL.age[i];if(a>TRAIL.life[i]){if(TRAIL.col[i*4+3]!==0)TRAIL.col[i*4+3]=0;continue;}
+    a+=dt;TRAIL.age[i]=a;const dr=Math.exp(-dt*1.6);
+    Vv[i*3]*=dr;Vv[i*3+1]=Vv[i*3+1]*dr+dt*.35;Vv[i*3+2]*=dr;
+    P3[i*3]+=Vv[i*3]*dt;P3[i*3+1]+=Vv[i*3+1]*dt;P3[i*3+2]+=Vv[i*3+2]*dt;
+    const L=TRAIL.life[i],t=a/L;
+    TRAIL.size[i]=.6+a*2.3;TRAIL.col[i*4+3]=.4*sstep(0,.2,a)*Math.pow(1-t,1.5);}
+  const g=TRAIL.pts.geometry;g.attributes.position.needsUpdate=true;g.attributes.rgba.needsUpdate=true;g.attributes.size.needsUpdate=true;
+  TRAIL.pts.material.uniforms.pscale.value=renderer.domElement.height/(2*Math.tan(camera.fov*DEG/2));
+}
+function trailClear(){TRAIL.age.fill(1e9);for(const E of TRAIL.em.values())E.has=false;}
+// replay : la fumée suit l’enregistrement (frame.a = pilote en l’air)
+function trailRpOn(t){const [a]=frameAt(t);return a.a!==undefined?!!a.a:!a.hp;}
+function trailsFrame(dt){
+  const fly=s=>s==='flying'||s==='deploying'||s==='canopy';
+  if(RP)trailEmit('me',jumper,0xff6a10,trailRpOn(RP.t),dt,recVel(RP.t,_t3v));
+  else trailEmit('me',jumper,0xff6a10,fly(state),dt,P.vel);
+  for(const [k,G] of MP.ghosts)trailEmit(k,G.J,G.col,fly(G.st),dt,G.vel);
+  for(const k of TRAIL.em.keys())if(k!=='me'&&!MP.ghosts.has(k))TRAIL.em.delete(k);
+  trailUpdate(dt);
+}
+
 function buildProps(){
   // exit cairn + guide
   const rock=new THREE.MeshLambertMaterial({color:lin(0x7d776e)});
@@ -937,6 +1005,7 @@ function onKey(code){const e={code};
   if(endShown&&!RP&&(code==='KeyV'||code==='KeyN'||code==='Tab')&&specAvail().length){specEnter();return;}
   if(e.code==='Space'){if(state==='title')startGame();else if(state==='ready')doJump();else if(state==='flying')deploy();}
   if(RP&&(e.code==='Escape'||e.code==='Enter')){stopReplay(true);return;}
+  if(RP&&(e.code==='KeyV'||e.code==='KeyC')){rpView();return;}
   if(endShown&&!RP&&/^(Digit|Numpad)\d$/.test(e.code)){const n=+e.code.slice(-1);if(n===0)startReplay(null);else if(RPLIST[n-1])startReplay(RPLIST[n-1]);return;}
   if(e.code==='KeyR'&&state!=='title'&&state!=='loading')resetRun();
   if(e.code==='KeyC'){camMode=(camMode+1)%2;}
@@ -1011,7 +1080,7 @@ tap('tbMode',()=>setMode(ctlMode==='gyro'?'pad':'gyro',true));
 document.querySelectorAll('#cpRow button').forEach(b=>b.addEventListener('click',()=>{onKey('Digit'+b.dataset.cp);gyroCal();}));
 document.querySelectorAll('#ctlMode button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.m,false)));
 tap('pauseResume',()=>{if(paused)onKey('KeyP');});
-tap('replayBack',()=>onKey('Escape'));
+tap('replayBack',()=>onKey('Escape'));tap('replayViewB',()=>rpView());
 tap('rotateSkip',()=>document.body.classList.add('noRotate'));
 function goFull(){if(!TOUCH)return;const d=document.documentElement,f=d.requestFullscreen||d.webkitRequestFullscreen;
   try{const p=f&&f.call(d,{navigationUI:'hide'});const lock=()=>{try{screen.orientation.lock('landscape').catch(()=>{});}catch(e){}};if(p&&p.then)p.then(lock).catch(()=>{});else lock();}catch(e){}}
@@ -1508,11 +1577,15 @@ function recFrame(dt){
   if(RP||endShown||!REC_STATES.includes(state))return;
   REC.t+=dt;REC.acc+=dt;if(REC.acc<1/30&&REC.frames.length)return;REC.acc=0;
   const q=jumper.quaternion,aL=jumper.userData.arms[0],h=jumper.userData.helmet,det=h.parent!==jumper,cv=canopyG.visible;
-  REC.frames.push({t:REC.t,p:[P.pos.x,P.pos.y,P.pos.z],q:[q.x,q.y,q.z,q.w],bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR],cv,
+  REC.frames.push({t:REC.t,a:state==='flying'||state==='deploying'||state==='canopy'?1:0,p:[P.pos.x,P.pos.y,P.pos.z],q:[q.x,q.y,q.z,q.w],bp:[BP.f,BP.fl,BP.inc,BP.roll,BP.cn,BP.bL,BP.bR],cv,
     cp:cv?canopyG.position.toArray():null,cr:cv?[canopyG.rotation.x,canopyG.rotation.y,canopyG.rotation.z]:null,cs:cv?canopyG.scale.toArray():null,
     hp:det?[h.position.x,h.position.y,h.position.z,h.rotation.x,h.rotation.y,h.rotation.z]:null});
 }
 let RP=null,RPLIST=[];
+// vue du replay : 0 = Auto (réalisation d’origine), puis les vues du mode spectateur
+let RPV=0;const RPS={pos:new V3(),fix:null,look:new V3(),f:new V3(0,0,-1),snap:true};
+function rpViewName(){return RPV===0?'Auto':SPEC_VIEWS[RPV-1];}
+function rpView(){RPV=(RPV+1)%(SPEC_VIEWS.length+1);RPS.fix=null;RPS.snap=true;if(RP)RP.init=false;$('replayViewN').textContent=rpViewName();}
 function frameAt(t){const F=REC.frames;let lo=0,hi=F.length-1;if(t<=F[0].t)return [F[0],F[0],0];if(t>=F[hi].t)return [F[hi],F[hi],0];
   while(hi-lo>1){const m=(lo+hi)>>1;if(F[m].t<=t)lo=m;else hi=m;}const a=F[lo],b=F[hi];return [a,b,(t-a.t)/Math.max(1e-6,b.t-a.t)];}
 function recPos(t,out){const [a,b,k]=frameAt(t);return out.set(lerp(a.p[0],b.p[0],k),lerp(a.p[1],b.p[1],k),lerp(a.p[2],b.p[2],k));}
@@ -1548,6 +1621,9 @@ function startReplay(ev){
   if(REC.frames.length<5)return;const F=REC.frames,last=F[F.length-1].t;
   const t0=ev?Math.max(F[0].t,ev.t-3.2):F[0].t,t1=ev?Math.min(last,ev.t+(ev.type==='crash'||ev.type==='land'?3.2:2.2)):last;
   RP={ev,t:t0,t0,t1,camP:new V3(),look:new V3(),init:false};
+  // fumée : on repart de zéro et on reconstitue la traînée des secondes qui précèdent
+  trailClear();for(let t=Math.max(F[0].t,t0-7);t<t0;t+=1/30){applyRec(t);trailEmit('me',jumper,0xff6a10,trailRpOn(t),1/30,recVel(t,_t3v));trailUpdate(1/30);}
+  applyRec(t0);RPS.fix=null;RPS.snap=true;$('replayViewN').textContent=rpViewName();
   if(ev){
     const pe=recPos(ev.t,new V3()),v=recVel(ev.t,new V3()),f=v.lengthSq()>1?v.clone().normalize():new V3(0,0,-1);
     const right=new V3().crossVectors(f,UP);if(right.lengthSq()<1e-3)right.set(1,0,0);right.normalize();
@@ -1566,7 +1642,7 @@ function startReplay(ev){
   AU.wind(0,false);AU.vario(0,0,0,false);
 }
 function stopReplay(show){
-  if(!RP)return;RP=null;if(REC.frames.length)applyRec(REC.frames[REC.frames.length-1].t);
+  if(!RP)return;RP=null;trailClear();if(REC.frames.length)applyRec(REC.frames[REC.frames.length-1].t);
   $('replayBar').classList.add('hidden');$('cineTop').classList.add('hidden');$('cineBot').classList.add('hidden');$('hud').classList.remove('hidden');
   if(show&&endShown)$('endScreen').classList.remove('hidden');
 }
@@ -1574,15 +1650,16 @@ function updateReplay(dtR){
   let rate=1;if(RP.ev){const d=Math.abs(RP.t-RP.ev.t);rate=lerp(.28,1,sstep(.25,1.4,d));}
   RP.t+=dtR*rate;if(RP.t>=RP.t1){stopReplay(true);return;}
   applyRec(RP.t);const jp=jumper.position;
-  if(RP.ev){camera.position.copy(RP.camP);
+  if(RPV>0){viewCam(RPS,SPEC_VIEWS[RPV-1],jp,recVel(RP.t,_t1),dtR);}
+  else if(RP.ev){camera.position.copy(RP.camP);
     const d=camera.position.distanceTo(jp);camera.fov=clamp(2*Math.atan(6/Math.max(d,1))/DEG,9,70);
   }else{const v=recVel(RP.t,_t1);const sp=v.length();const dir=sp>3?v.divideScalar(sp):_t1.set(0,-.3,-1).normalize();
     const want=_t2.copy(jp).addScaledVector(dir,-12).add(_U.set(0,3.5,0));
     if(!RP.init)RP.camP.copy(want);else RP.camP.lerp(want,1-Math.exp(-dtR*4));
     const gmin=groundH(RP.camP.x,RP.camP.z)+1.2;if(RP.camP.y<gmin)RP.camP.y=gmin;camera.position.copy(RP.camP);camera.fov=70;}
-  if(!RP.init){RP.look.copy(jp);RP.init=true;}else RP.look.lerp(jp,1-Math.exp(-dtR*12));
-  camera.up.set(0,1,0);camera.lookAt(RP.look);camera.updateProjectionMatrix();
-  $('replayHint').textContent=(rate<.6?'Ralenti ×'+rate.toFixed(1).replace('.',',')+' · ':'')+'Échap : retour · R : recommencer';
+  if(RPV===0){if(!RP.init){RP.look.copy(jp);RP.init=true;}else RP.look.lerp(jp,1-Math.exp(-dtR*12));
+    camera.up.set(0,1,0);camera.lookAt(RP.look);camera.updateProjectionMatrix();}
+  $('replayHint').textContent=(rate<.6?'Ralenti ×'+rate.toFixed(1).replace('.',',')+' · ':'')+(TOUCH?'':'V : vue · Échap : retour · R : recommencer');
   sun.position.copy(jp).addScaledVector(SUN_DIR,450);sun.target.position.copy(jp);
 }
 function fxUpdate(dt){
@@ -1614,7 +1691,7 @@ function frame(now){
   if(state==='loading'){renderer.render(scene,camera);return;}
   mpTick(dtR);
   if(paused){renderer.render(scene,camera);return;}
-  if(RP){time+=dtR;updateReplay(dtR);fxUpdate(dtR);updateStreaks(_t1.set(0,0,0),camera.position);sky.position.copy(camera.position);renderer.render(scene,camera);return;}
+  if(RP){time+=dtR;const rpT=RP.t;updateReplay(dtR);if(RP)trailsFrame(Math.max(0,RP.t-rpT));fxUpdate(dtR);updateStreaks(_t1.set(0,0,0),camera.position);sky.position.copy(camera.position);renderer.render(scene,camera);return;}
   timeScale=lerp(timeScale,1,1-Math.exp(-dtR*(state==='crashed'?.9:2.2)));
   const dt=dtR*timeScale;time+=dt;
   if(state==='ready'){P.idle+=dt;
@@ -1634,6 +1711,7 @@ function frame(now){
   sun.position.copy(P.pos).addScaledVector(SUN_DIR,450);sun.target.position.copy(P.pos);
   sky.position.copy(camera.position);
   updateHUD(dtR);if(TOUCH)actLabel();
+  trailsFrame(paused?0:dtR*timeScale);
   renderer.render(scene,camera);
 }
 
@@ -1879,30 +1957,34 @@ function specNext(dir){const L=specAvail();if(!L.length)return;const i=L.indexOf
 function specView(){SPEC.view=(SPEC.view+1)%SPEC_VIEWS.length;SPEC.fix=null;SPEC.snap=true;specLabel();}
 function specLabel(){const G=MP.ghosts.get(SPEC.peer);$('specName').textContent=G?G.name:'';$('specName').style.color=G?hexCss(G.col):'';$('specViewN').textContent=SPEC_VIEWS[SPEC.view];}
 const _sc=new V3(),_su=new V3(0,1,0),_ss=new V3(),_st=new V3();
+/* vues de caméra communes au spectateur et aux replays — S : {pos,fix,look,f,snap} */
+function viewCam(S,v,T,V,dt){
+  const sp=V.length();
+  if(sp>2)S.f.lerp(_st.copy(V).normalize(),S.snap?1:1-Math.exp(-dt*3)).normalize();
+  const f=S.f,side=_ss.copy(f).cross(_su).normalize(),k=S.snap?1:1-Math.exp(-dt*5);let fov=62;
+  if(v==='Poursuite'){_sc.copy(T).addScaledVector(f,-11).addScaledVector(_su,3.2);S.look.copy(T).addScaledVector(f,10);}
+  else if(v==='Travelling'){_sc.copy(T).addScaledVector(side,20).addScaledVector(_su,2).addScaledVector(f,-3);S.look.copy(T);fov=45;}
+  else if(v==='Face'){_sc.copy(T).addScaledVector(f,8.5).addScaledVector(_su,1.6);S.look.copy(T);fov=58;}
+  else if(v==='Casque'){_sc.copy(T).addScaledVector(f,.35).addScaledVector(_su,.55);S.look.copy(T).addScaledVector(f,30);fov=78;}
+  else if(v==='Drone'){_sc.copy(T).addScaledVector(_su,55).addScaledVector(f,-18);S.look.copy(T).addScaledVector(f,25);fov=55;}
+  else{ // Fixe : caméra posée devant la trajectoire, replacée quand le pilote s’éloigne
+    const rel=S.fix?_st.copy(T).sub(S.fix):null;
+    if(!S.fix||rel.length()>230||rel.dot(f)>70){const sgn=Math.random()<.5?-1:1;
+      S.fix=new V3().copy(T).addScaledVector(f,Math.max(90,sp*3.2)).addScaledVector(side,sgn*35);
+      S.fix.y=Math.max(groundH(S.fix.x,S.fix.z)+2.5,T.y-20);S.snap=true;}
+    _sc.copy(S.fix);S.look.copy(T);const d=_sc.distanceTo(T);fov=clamp(2*Math.atan(14/Math.max(1,d))*180/Math.PI,8,60);}
+  // jamais sous le terrain
+  const g=groundH(_sc.x,_sc.z)+1.5;if(_sc.y<g)_sc.y=g;
+  const snap=S.snap;if(v==='Fixe'||v==='Casque'||snap)S.pos.copy(_sc);else S.pos.lerp(_sc,k);
+  S.snap=false;
+  camera.position.copy(S.pos);camera.up.set(0,1,0);camera.lookAt(S.look);
+  camera.fov=snap?fov:lerp(camera.fov,fov,v==='Fixe'?.25:1-Math.exp(-dt*4));camera.updateProjectionMatrix();
+}
 function specCamera(dt){
   let G=MP.ghosts.get(SPEC.peer);
   if(!G||!G.J.visible){const L=specAvail();if(!L.length){specExit(true);return false;}SPEC.peer=L[0];SPEC.fix=null;SPEC.snap=true;specLabel();G=MP.ghosts.get(SPEC.peer);}
   const T=G.J.position,V=G.vel||_st.set(0,0,0),sp=V.length();
-  if(sp>2)SPEC.f.lerp(_st.copy(V).normalize(),1-Math.exp(-dt*3)).normalize();
-  const f=SPEC.f,side=_ss.copy(f).cross(_su).normalize(),k=SPEC.snap?1:1-Math.exp(-dt*5);let fov=62;
-  const v=SPEC_VIEWS[SPEC.view];
-  if(v==='Poursuite'){_sc.copy(T).addScaledVector(f,-11).addScaledVector(_su,3.2);SPEC.look.copy(T).addScaledVector(f,10);}
-  else if(v==='Travelling'){_sc.copy(T).addScaledVector(side,20).addScaledVector(_su,2).addScaledVector(f,-3);SPEC.look.copy(T);fov=45;}
-  else if(v==='Face'){_sc.copy(T).addScaledVector(f,8.5).addScaledVector(_su,1.6);SPEC.look.copy(T);fov=58;}
-  else if(v==='Casque'){_sc.copy(T).addScaledVector(f,.35).addScaledVector(_su,.55);SPEC.look.copy(T).addScaledVector(f,30);fov=78;}
-  else if(v==='Drone'){_sc.copy(T).addScaledVector(_su,55).addScaledVector(f,-18);SPEC.look.copy(T).addScaledVector(f,25);fov=55;}
-  else{ // Fixe : caméra posée devant la trajectoire, replacée quand le pilote s’éloigne
-    const rel=SPEC.fix?_st.copy(T).sub(SPEC.fix):null;
-    if(!SPEC.fix||rel.length()>230||rel.dot(f)>70){const sgn=Math.random()<.5?-1:1;
-      SPEC.fix=new V3().copy(T).addScaledVector(f,Math.max(90,sp*3.2)).addScaledVector(side,sgn*35);
-      SPEC.fix.y=Math.max(groundH(SPEC.fix.x,SPEC.fix.z)+2.5,T.y-20);SPEC.snap=true;}
-    _sc.copy(SPEC.fix);SPEC.look.copy(T);const d=_sc.distanceTo(T);fov=clamp(2*Math.atan(14/Math.max(1,d))*180/Math.PI,8,60);}
-  // jamais sous le terrain
-  const g=groundH(_sc.x,_sc.z)+1.5;if(_sc.y<g)_sc.y=g;
-  if(v==='Fixe'||v==='Casque'||SPEC.snap)SPEC.pos.copy(_sc);else SPEC.pos.lerp(_sc,k);
-  SPEC.snap=false;G.sp.visible=v!=='Casque';
-  camera.position.copy(SPEC.pos);camera.up.set(0,1,0);camera.lookAt(SPEC.look);
-  camera.fov=lerp(camera.fov,fov,v==='Fixe'?.25:1-Math.exp(-dt*4));camera.updateProjectionMatrix();
+  const v=SPEC_VIEWS[SPEC.view];viewCam(SPEC,v,T,V,dt);G.sp.visible=v!=='Casque';
   const agl=Math.max(0,T.y-groundH(T.x,T.z));
   $('specInfo').textContent=({flying:'✈ en vol',deploying:'🪂 ouverture',canopy:'🪂 sous voile',landed:'✔ posé',crashed:'💥 au tapis'}[G.st]||'')+
     ' · '+Math.round(sp*3.6)+' km/h · '+Math.round(agl)+' m/sol · '+(Math.max(0,-T.z)/1000).toFixed(2).replace('.',',')+' km';
